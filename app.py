@@ -18,7 +18,7 @@ import os
 # ==========================================
 # 1. CONFIGURACIÓN ESTILO (GEMINI UI)
 # ==========================================
-st.set_page_config(page_title="Universal Text Analyzer", layout="wide")
+st.set_page_config(page_title="Analizador Semantico", layout="wide")
 
 # --- AQUÍ ESTÁ LA MAGIA DEL CSS ---
 st.markdown("""
@@ -83,8 +83,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Universal Text Analyzer")
-st.markdown("Suite de ingeniería de datos para análisis de texto no estructurado, detección de patrones y redes.")
+st.title("Analizador Semantico")
+st.markdown("Suite para análisis de texto, detección de patrones y redes.")
 
 # ==========================================
 # 2. FUNCIONES DE CARGA (CACHÉ)
