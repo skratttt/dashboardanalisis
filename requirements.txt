@@ -1,0 +1,11 @@
+streamlit
+pandas
+torch
+transformers
+spacy
+matplotlib
+seaborn
+scikit-learn
+bertopic
+plotly
+wordcloud
