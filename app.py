@@ -1,70 +1,66 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 import spacy
-from collections import Counter
 from sklearn.feature_extraction.text import CountVectorizer
 import torch
 from transformers import BertTokenizer, BertForSequenceClassification
 from bertopic import BERTopic
+from sentence_transformers import SentenceTransformer, util
+import networkx as nx
+from pyvis.network import Network
+import streamlit.components.v1 as components
+import tempfile
+import os
 
 # ==========================================
-# 1. CONFIGURACIÓN GENERAL
+# 1. CONFIGURACIÓN ESTILO
 # ==========================================
-st.set_page_config(page_title="Dashboard de Prensa IA", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Data Intelligence Suite", layout="wide")
 
 st.markdown("""
 <style>
-    .block-container {padding-top: 1rem; padding-bottom: 0rem;}
-    h1 {color: #2c3e50;}
+    .block-container {padding-top: 1rem;}
+    h1 {color: #0e1117;}
+    .stTabs [data-baseweb="tab-list"] {gap: 10px;}
+    .stTabs [data-baseweb="tab"] {height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 4px 4px 0px 0px; gap: 1px; padding-top: 10px; padding-bottom: 10px;}
+    .stTabs [aria-selected="true"] {background-color: #ffffff; border-bottom: 2px solid #000000;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📈 Dashboard de Análisis")
-st.markdown("Herramienta de inteligencia de datos para auditoría de medios y detección de tendencias.")
+st.title("Data Intelligence Suite")
+st.markdown("Plataforma de ingeniería de datos para análisis semántico, detección de anomalías y redes complejas.")
 
 # ==========================================
-# 2. FUNCIONES DE CARGA Y PROCESAMIENTO
+# 2. FUNCIONES DE CARGA (CACHÉ)
 # ==========================================
 
 @st.cache_resource
 def cargar_spacy():
-    try:
-        return spacy.load("es_core_news_sm")
-    except:
-        return None
+    try: return spacy.load("es_core_news_sm")
+    except: return None
 
 @st.cache_resource
 def cargar_modelo_sentimiento():
     nombre = "VerificadoProfesional/SaBERT-Spanish-Sentiment-Analysis"
     return BertTokenizer.from_pretrained(nombre), BertForSequenceClassification.from_pretrained(nombre)
 
-# Función para N-Gramas (Frases repetidas)
-def get_top_ngrams(corpus, n=2, top_k=15):
-    vec = CountVectorizer(ngram_range=(n, n), stop_words=STOPWORDS_ES).fit(corpus)
-    bag_of_words = vec.transform(corpus)
-    sum_words = bag_of_words.sum(axis=0)
-    words_freq = [(word, sum_words[0, idx]) for word, idx in vec.vocabulary_.items()]
-    words_freq = sorted(words_freq, key=lambda x: x[1], reverse=True)
-    return pd.DataFrame(words_freq[:top_k], columns=['Frase', 'Frecuencia'])
+@st.cache_resource
+def cargar_modelo_embeddings():
+    # Modelo ligero para búsqueda semántica
+    return SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
 
-# Stopwords personalizadas
-# Puedes agregar más palabras aquí si ves que ensucian la nube
-STOPWORDS_ES = list(cargar_spacy().Defaults.stop_words) + [
-    'chile', 'chileno', 'chilena', 'tras', 'hacia', 'según', 'foto', 'video', 'clic', 'aquí', 'noticia', 
-    'hoy', 'ayer', 'mañana', 'año', 'años', 'dice', 'ser', 'dijo', 'señaló', 'millones', 'peso', 'pesos',
-    'parte', 'gran', 'nuevo', 'nueva', 'frente', 'hacer', 'hace', 'puede', 'forma'
-]
+# Stopwords
+STOPWORDS_ES = list(cargar_spacy().Defaults.stop_words) + ['chile', 'chileno', 'chilena', 'noticia', 'hoy', 'ayer', 'tras', 'hacia', 'según', 'dice', 'ser', 'parte', 'nuevo']
 
 # ==========================================
-# 3. BARRA LATERAL (CONFIGURACIÓN)
+# 3. BARRA LATERAL
 # ==========================================
 with st.sidebar:
-    st.header("📂 Configuración de Datos")
-    archivo = st.file_uploader("1. Sube tu Dataset (CSV)", type=["csv"])
+    st.header("Carga de Datos")
+    archivo = st.file_uploader("Sube Dataset (CSV)", type=["csv"])
     
     col_texto = None
     col_medio = None
@@ -72,226 +68,196 @@ with st.sidebar:
     if archivo:
         try:
             df = pd.read_csv(archivo)
-            st.success(f"Cargado: {len(df)} registros")
-            
-            # Mapeo de columnas
-            st.subheader("2. Mapeo de Columnas")
+            st.success(f"Registros cargados: {len(df)}")
             cols = df.columns.tolist()
-            
-            # Intenta adivinar la columna de texto
-            idx_texto = cols.index('titulo') if 'titulo' in cols else 0
-            col_texto = st.selectbox("Columna de TEXTO (Titular/Bajada)", cols, index=idx_texto)
-            
-            # Intenta adivinar la columna de medio
-            idx_medio = cols.index('medio') if 'medio' in cols else 0
-            col_medio = st.selectbox("Columna de MEDIO (Opcional)", ["No disponible"] + cols, index=idx_medio + 1)
+            idx_txt = cols.index('titulo') if 'titulo' in cols else 0
+            col_texto = st.selectbox("Columna Texto", cols, index=idx_txt)
+            idx_med = cols.index('medio') if 'medio' in cols else 0
+            col_medio = st.selectbox("Columna Medio (Opcional)", ["No disponible"] + cols, index=idx_med + 1)
         except Exception as e:
-            st.error(f"Error leyendo el archivo: {e}")
+            st.error(f"Error: {e}")
 
 # ==========================================
-# 4. LÓGICA PRINCIPAL DEL DASHBOARD
+# 4. LÓGICA PRINCIPAL
 # ==========================================
-
 if archivo and col_texto:
-    # Limpieza inicial
     df = df.dropna(subset=[col_texto])
     df[col_texto] = df[col_texto].astype(str)
-    
-    # --- PESTAÑAS ---
-    tab_resumen, tab_sentimiento, tab_lenguaje, tab_clusters = st.tabs([
-        " Resumen General", "Radiografía Emocional", "Análisis de Lenguaje", "Temas (Clustering)"
-    ])
 
-    # === PESTAÑA 1: RESUMEN GENERAL ===
-    with tab_resumen:
-        st.subheader("Datos Generales del Dataset")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Noticias Analizadas", len(df))
-        
+    # Definir pestañas (Sin Emojis)
+    tabs = st.tabs(["Resumen", "Sentimiento", "Lenguaje", "Temas y Anomalias", "Buscador Semantico", "Analisis de Redes"])
+
+    # --- TAB 1: RESUMEN ---
+    with tabs[0]:
+        c1, c2 = st.columns(2)
+        c1.metric("Volumen Total", len(df))
         if col_medio != "No disponible":
             c2.metric("Medios Monitoreados", df[col_medio].nunique())
-            try:
-                top_medio = df[col_medio].mode()[0]
-                c3.metric("Medio más activo", top_medio)
-            except:
-                c3.metric("Medio más activo", "N/A")
-            
-            st.markdown("---")
-            st.subheader("Participación por Medio")
-            conteo_medios = df[col_medio].value_counts().reset_index()
-            conteo_medios.columns = ['Medio', 'Noticias']
-            fig_medios = px.bar(conteo_medios.head(15), x='Noticias', y='Medio', orientation='h', 
-                                title="Top 15 Medios con más noticias", color='Noticias', color_continuous_scale='Blues')
-            fig_medios.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_medios, use_container_width=True)
-        else:
-            c2.metric("Medios", "N/A")
-            st.info("Para ver estadísticas por medio, selecciona la columna correspondiente en la barra lateral.")
+            conteo = df[col_medio].value_counts().reset_index()
+            conteo.columns = ['Medio', 'Count']
+            fig = px.bar(conteo.head(15), x='Count', y='Medio', orientation='h', title="Distribución por Medio")
+            fig.update_layout(yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig, use_container_width=True)
 
-    # === PESTAÑA 2: SENTIMIENTO ===
-    with tab_sentimiento:
-        st.subheader("Análisis de Sentimiento (IA)")
-        
-        if st.button("▶️ Ejecutar Análisis de Sentimiento", type="primary"):
-            with st.spinner('Analizando tono de las noticias...'):
-                tokenizer, model = cargar_modelo_sentimiento()
+    # --- TAB 2: SENTIMIENTO ---
+    with tabs[1]:
+        if st.button("Ejecutar Analisis de Sentimiento", type="primary"):
+            with st.spinner("Procesando..."):
+                tok, mod = cargar_modelo_sentimiento()
+                def predict(txts):
+                    inp = tok(txts, return_tensors="pt", padding=True, truncation=True, max_length=64).to("cpu")
+                    with torch.no_grad(): out = mod(**inp)
+                    return ["Positivo" if p[1]>p[0] else "Negativo" for p in torch.softmax(out.logits, dim=1)]
                 
-                def predecir_batch(textos):
-                    inputs = tokenizer(textos, return_tensors="pt", padding=True, truncation=True, max_length=64).to("cpu")
-                    with torch.no_grad():
-                        outputs = model(**inputs)
-                    probs = torch.softmax(outputs.logits, dim=1)
-                    return ["Positivo" if p[1] > p[0] else "Negativo" for p in probs]
-
-                batch_size = 32
-                todos_sents = []
-                textos = df[col_texto].tolist()
+                res = []
+                bs = 32
+                prog = st.progress(0)
+                txts = df[col_texto].tolist()
+                for i in range(0, len(txts), bs):
+                    res.extend(predict(txts[i:i+bs]))
+                    prog.progress(min((i+bs)/len(txts), 1.0))
+                df['Sentimiento'] = res
                 
-                progreso = st.progress(0)
-                for i in range(0, len(textos), batch_size):
-                    batch = textos[i:i+batch_size]
-                    todos_sents.extend(predecir_batch(batch))
-                    progreso.progress(min((i + batch_size) / len(textos), 1.0))
-                
-                df['Sentimiento'] = todos_sents
-                st.success("Análisis completado")
-
                 c1, c2 = st.columns([1, 2])
-                with c1:
-                    fig_pie = px.pie(df, names='Sentimiento', title="Distribución Global", 
-                                     color='Sentimiento', color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'})
-                    st.plotly_chart(fig_pie, use_container_width=True)
-
+                with c1: st.plotly_chart(px.pie(df, names='Sentimiento', title="Global", color='Sentimiento', color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}), use_container_width=True)
                 with c2:
                     if col_medio != "No disponible":
-                        st.subheader(" Mapa de Calor: Línea Editorial")
-                        conteo_minimo = 2
-                        medios_validos = df[col_medio].value_counts()
-                        medios_validos = medios_validos[medios_validos > conteo_minimo].index
-                        df_filtrado = df[df[col_medio].isin(medios_validos)]
-                        cruce = pd.crosstab(df_filtrado[col_medio], df_filtrado['Sentimiento'], normalize='index') * 100
-                        fig_heat = px.imshow(cruce, text_auto='.1f', aspect="auto",
-                                             labels=dict(x="Sentimiento", y="Medio", color="%"),
-                                             color_continuous_scale="RdBu", origin='lower')
-                        st.plotly_chart(fig_heat, use_container_width=True)
-                    else:
-                        st.info("Selecciona columna 'Medio' para ver el Mapa de Calor.")
+                        df_f = df[df[col_medio].isin(df[col_medio].value_counts()[lambda x: x>2].index)]
+                        st.plotly_chart(px.imshow(pd.crosstab(df_f[col_medio], df_f['Sentimiento'], normalize='index')*100, text_auto='.0f', aspect="auto", color_continuous_scale="RdBu", origin='lower'), use_container_width=True)
 
-                st.download_button("Descargar CSV con Sentimiento", df.to_csv(index=False), "datos_sentimiento.csv")
-
-    # === PESTAÑA 3: LENGUAJE (AQUÍ ESTÁ LA NUEVA NUBE) ===
-    with tab_lenguaje:
-        if st.button("▶️ Analizar Texto y Entidades"):
+    # --- TAB 3: LENGUAJE ---
+    with tabs[2]:
+        if st.button("Ejecutar Analisis de Entidades"):
             nlp = cargar_spacy()
+            doc = nlp(" ".join(df[col_texto].tolist())[:1000000])
             
-            with st.spinner("Generando nube y extrayendo entidades..."):
-                # 1. Preparar texto completo
-                texto_total = " ".join(df[col_texto].astype(str).tolist())
-                
-                # --- NUEVA SECCIÓN: NUBE DE PALABRAS GENERAL ---
-                st.subheader(" Nube de Palabras Global")
-                st.markdown("Conceptos más repetidos en todo el dataset:")
-                
-                # Generamos la nube
-                wc_general = WordCloud(
-                    width=800, height=400, 
-                    background_color='white', 
-                    stopwords=STOPWORDS_ES,
-                    colormap='viridis',
-                    max_words=100
-                ).generate(texto_total[:2000000]) # Limitamos caracteres para proteger memoria
+            ents = [e.text for e in doc.ents if len(e.text)>2 and e.label_ in ["PER", "ORG", "LOC"]]
+            counts = pd.Series(ents).value_counts().head(15).sort_values()
+            st.plotly_chart(px.bar(x=counts.values, y=counts.index, orientation='h', title="Top Entidades Detectadas"), use_container_width=True)
 
-                # Mostramos con Matplotlib
-                fig_wc, ax_wc = plt.subplots(figsize=(10, 5))
-                ax_wc.imshow(wc_general, interpolation='bilinear')
-                ax_wc.axis('off')
-                st.pyplot(fig_wc)
-                plt.close() # Cerramos figura para liberar memoria
-                # -----------------------------------------------
-
-                # 2. PROCESAMIENTO NLP (ENTIDADES)
-                doc = nlp(texto_total[:1000000]) 
-
-                personas = [ent.text for ent in doc.ents if ent.label_ == "PER" and len(ent.text) > 3]
-                orgs = [ent.text for ent in doc.ents if ent.label_ in ["ORG", "MISC"] and len(ent.text) > 2]
-                lugares = [ent.text for ent in doc.ents if ent.label_ in ["LOC", "GPE"] and len(ent.text) > 2]
-
-                def plot_top_ent(lista, titulo, color):
-                    if not lista: return
-                    counts = pd.Series(lista).value_counts().head(10).sort_values(ascending=True)
-                    fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo,
-                                 labels={'x':'Menciones', 'y':''}, color_discrete_sequence=[color])
-                    st.plotly_chart(fig, use_container_width=True)
-
-                st.markdown("---")
-                st.subheader("🕵️ Detección de Entidades")
-                c1, c2, c3 = st.columns(3)
-                with c1: plot_top_ent(personas, "Top Personajes", "#e74c3c")
-                with c2: plot_top_ent(orgs, "Top Organizaciones", "#3498db")
-                with c3: plot_top_ent(lugares, "Top Lugares", "#27ae60")
-
-                st.markdown("---")
-
-                # 3. ANÁLISIS DE N-GRAMAS
-                st.subheader("🗣️ Frases más repetidas")
-                c_bi, c_tri = st.columns(2)
-                
-                with c_bi:
-                    df_bi = get_top_ngrams(df[col_texto], n=2, top_k=10)
-                    fig_bi = px.bar(df_bi, x='Frecuencia', y='Frase', orientation='h', 
-                                    title="Top Bigramas (2 palabras)", color='Frecuencia', color_continuous_scale='Viridis')
-                    fig_bi.update_layout(yaxis={'categoryorder':'total ascending'})
-                    st.plotly_chart(fig_bi, use_container_width=True)
-
-                with c_tri:
-                    df_tri = get_top_ngrams(df[col_texto], n=3, top_k=10)
-                    fig_tri = px.bar(df_tri, x='Frecuencia', y='Frase', orientation='h', 
-                                     title="Top Trigramas (3 palabras)", color='Frecuencia', color_continuous_scale='Magma')
-                    fig_tri.update_layout(yaxis={'categoryorder':'total ascending'})
-                    st.plotly_chart(fig_tri, use_container_width=True)
-
-    # === PESTAÑA 4: CLUSTERING ===
-    with tab_clusters:
-        st.subheader("Descubrimiento de Temas (BERTopic)")
-        
-        if st.button("▶️ Generar Clusters (Puede tardar)", type="primary"):
-            with st.spinner("Entrenando modelo de clustering..."):
+    # --- TAB 4: TEMAS Y OUTLIERS ---
+    with tabs[3]:
+        st.subheader("Modelado de Topicos (Clustering) + Deteccion de Anomalias")
+        if st.button("Detectar Temas y Anomalias", type="primary"):
+            with st.spinner("Entrenando modelo..."):
                 topic_model = BERTopic(language="multilingual", min_topic_size=5)
-                docs = df[col_texto].tolist()
-                topics, probs = topic_model.fit_transform(docs)
+                topics, probs = topic_model.fit_transform(df[col_texto].tolist())
+                df['Tema'] = topics
                 
+                # SECCIÓN 1: TEMAS PRINCIPALES
                 freq = topic_model.get_topic_info()
-                df['Tema_ID'] = topics
-                
-                st.subheader("Cantidad de Noticias por Tema")
                 freq_clean = freq[freq['Topic'] != -1].head(10)
-                freq_clean['Nombre_Corto'] = freq_clean['Name'].apply(lambda x: "_".join(x.split("_")[1:3]))
+                freq_clean['Nombre'] = freq_clean['Name'].apply(lambda x: " ".join(x.split("_")[1:4]))
                 
-                fig_bar = px.bar(freq_clean, x='Nombre_Corto', y='Count', 
-                                 title="Temas Principales Detectados", 
-                                 text_auto=True,
-                                 color='Count', color_continuous_scale='Purples')
-                st.plotly_chart(fig_bar, use_container_width=True)
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    st.plotly_chart(px.bar(freq_clean, x='Nombre', y='Count', title="Temas Principales", color='Count'), use_container_width=True)
+                with c2:
+                    st.info("Mapa de Distancia Inter-Topicos")
+                    st.plotly_chart(topic_model.visualize_topics(), use_container_width=True)
 
-                st.subheader("Mapa de Inter-distancia de Temas")
-                fig_map = topic_model.visualize_topics()
-                st.plotly_chart(fig_map, use_container_width=True)
-
-                st.subheader("Nubes de Palabras por Grupo")
-                cols = st.columns(3)
-                top_clusters = freq_clean['Topic'].tolist()[:6] 
+                st.markdown("---")
                 
-                for idx, topic_id in enumerate(top_clusters):
-                    text_cluster = " ".join(df[df['Tema_ID'] == topic_id][col_texto].tolist())
-                    wc = WordCloud(width=400, height=200, background_color='white', stopwords=STOPWORDS_ES).generate(text_cluster)
+                # SECCIÓN 2: DETECTOR DE OUTLIERS
+                st.subheader("Detector de Anomalias (Outliers)")
+                st.markdown("""
+                Las noticias clasificadas como **Topico -1** son ruido o **anomalias**: textos que no encajan en ningun patron comun. 
+                """)
+                
+                outliers = df[df['Tema'] == -1]
+                st.metric("Cantidad de Anomalias Detectadas", len(outliers))
+                
+                with st.expander(f"Ver lista de las {len(outliers)} noticias anomalas"):
+                    st.dataframe(outliers[[col_texto] + ([col_medio] if col_medio != "No disponible" else [])])
+
+    # --- TAB 5: BUSCADOR SEMÁNTICO ---
+    with tabs[4]:
+        st.subheader("Buscador Semantico Neural")
+        st.markdown("Busqueda por contexto y significado.")
+        
+        query = st.text_input("Ingrese consulta:", placeholder="Ej: Crisis de seguridad, corrupcion, innovacion tecnologica...")
+        top_k = st.slider("Resultados", 3, 20, 5)
+
+        if query:
+            with st.spinner("Calculando similitud..."):
+                model_emb = cargar_modelo_embeddings()
+                # Encoding
+                corpus_emb = model_emb.encode(df[col_texto].tolist(), convert_to_tensor=True)
+                query_emb = model_emb.encode(query, convert_to_tensor=True)
+                
+                # Cosine Similarity
+                hits = util.semantic_search(query_emb, corpus_emb, top_k=top_k)[0]
+                
+                st.markdown("### Resultados Relevantes")
+                for hit in hits:
+                    idx = hit['corpus_id']
+                    score = hit['score']
+                    txt = df.iloc[idx][col_texto]
+                    src = df.iloc[idx][col_medio] if col_medio != "No disponible" else "N/A"
                     
-                    with cols[idx % 3]:
-                        st.markdown(f"**Tema {topic_id}**")
-                        plt.figure(figsize=(5, 3))
-                        plt.imshow(wc, interpolation='bilinear')
-                        plt.axis('off')
-                        st.pyplot(plt)
-                        plt.close()
+                    st.markdown(f"""
+                    <div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #333;">
+                        <small><b>Relevancia: {score:.2f}</b> | {src}</small><br>
+                        {txt}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+    # --- TAB 6: ANÁLISIS DE REDES ---
+    with tabs[5]:
+        st.subheader("Grafo de Conexiones (Network Analysis)")
+        st.markdown("Visualizacion de relaciones entre entidades (Personas y Organizaciones).")
+
+        if st.button("Generar Red de Conexiones"):
+            with st.spinner("Construyendo grafo..."):
+                nlp = cargar_spacy()
+                
+                # 1. Extraer entidades
+                docs = list(nlp.pipe(df[col_texto].head(1000).astype(str), disable=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"]))
+                
+                entity_list = []
+                for doc in docs:
+                    ents = sorted(list(set([e.text for e in doc.ents if e.label_ in ["PER", "ORG"] and len(e.text) > 3])))
+                    if len(ents) > 1:
+                        entity_list.append(ents)
+
+                # 2. Construir Grafo
+                G = nx.Graph()
+                co_occurrences = {}
+                node_counts = {}
+
+                for ents in entity_list:
+                    for i in range(len(ents)):
+                        node_counts[ents[i]] = node_counts.get(ents[i], 0) + 1
+                        for j in range(i + 1, len(ents)):
+                            pair = tuple(sorted((ents[i], ents[j])))
+                            co_occurrences[pair] = co_occurrences.get(pair, 0) + 1
+
+                # Filtro Top 40
+                top_nodes = sorted(node_counts, key=node_counts.get, reverse=True)[:40]
+                
+                for node in top_nodes:
+                    G.add_node(node, size=node_counts[node]*2, title=f"Menciones: {node_counts[node]}", group=1)
+                
+                for (source, target), weight in co_occurrences.items():
+                    if source in top_nodes and target in top_nodes:
+                        G.add_edge(source, target, value=weight, title=f"Co-ocurrencias: {weight}")
+
+                # 3. Visualizar
+                if len(G.nodes) > 0:
+                    net = Network(height="600px", width="100%", bgcolor="#ffffff", font_color="black")
+                    net.from_nx(G)
+                    net.force_atlas_2based()
+                    
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as tmp:
+                        net.save_graph(tmp.name)
+                        tmp.seek(0)
+                        html_bytes = tmp.read()
+                    
+                    st.success(f"Grafo generado: {len(G.nodes)} nodos.")
+                    components.html(html_bytes.decode(), height=600, scrolling=True)
+                    os.unlink(tmp.name)
+                else:
+                    st.warning("No hay suficientes datos para generar el grafo.")
 
 else:
-    st.info("👈 Comienza subiendo un archivo CSV en la barra lateral.")             
+    st.info("Sube tu archivo CSV para comenzar.")
