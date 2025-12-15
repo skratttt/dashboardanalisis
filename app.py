@@ -30,8 +30,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Data Intelligence Suite")
-st.markdown("Plataforma de ingeniería de datos para análisis semántico, detección de anomalías y redes complejas.")
+st.title("nalisis De Datos FabricaChile")
+st.markdown("Plataforma para análisis.")
 
 # ==========================================
 # 2. FUNCIONES DE CARGA (CACHÉ)
