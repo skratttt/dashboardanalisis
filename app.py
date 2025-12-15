@@ -98,7 +98,7 @@ if archivo and col_texto:
     
     # --- PESTAÑAS ---
     tab_resumen, tab_sentimiento, tab_lenguaje, tab_clusters = st.tabs([
-        "📊 Resumen General", "❤️ Radiografía Emocional", "🗣️ Análisis de Lenguaje", "🧩 Temas (Clustering)"
+        " Resumen General", " Radiografía Emocional", "Análisis de Lenguaje", " Temas (Clustering)"
     ])
 
     # === PESTAÑA 1: RESUMEN GENERAL (METRICAS) ===
@@ -173,7 +173,7 @@ if archivo and col_texto:
                 # 2. HEATMAP (MEDIO vs SENTIMIENTO)
                 with c2:
                     if col_medio != "No disponible":
-                        st.subheader("🔥 Mapa de Calor: Línea Editorial")
+                        st.subheader(" Mapa de Calor: Línea Editorial")
                         st.markdown("¿Qué medios son más negativos o positivos?")
                         
                         # Filtramos medios con pocas noticias para no ensuciar el gráfico
@@ -197,7 +197,7 @@ if archivo and col_texto:
 
     # === PESTAÑA 3: LENGUAJE Y ENTIDADES ===
     with tab_lenguaje:
-        if st.button("▶️ Analizar Texto y Entidades"):
+        if st.button("Analizar Texto y Entidades"):
             nlp = cargar_spacy()
             
             with st.spinner("Extrayendo entidades y n-gramas..."):
@@ -226,7 +226,7 @@ if archivo and col_texto:
                 st.markdown("---")
 
                 # 2. ANÁLISIS DE N-GRAMAS
-                st.subheader("🗣️ Frases más repetidas")
+                st.subheader(" Frases más repetidas")
                 c_bi, c_tri = st.columns(2)
                 
                 with c_bi:
@@ -245,7 +245,7 @@ if archivo and col_texto:
 
     # === PESTAÑA 4: CLUSTERING (TEMAS) ===
     with tab_clusters:
-        st.subheader("🧩 Descubrimiento de Temas (BERTopic)")
+        st.subheader(" Descubrimiento de Temas (BERTopic)")
         st.markdown("Agrupa noticias automáticamente sin necesidad de leerlas.")
 
         if st.button("▶️ Generar Clusters (Puede tardar)", type="primary"):
@@ -294,4 +294,4 @@ if archivo and col_texto:
                         plt.close()
 
 else:
-    st.info("👈 Comienza subiendo un archivo CSV en la barra lateral.")
+    st.info(" Comienza subiendo un archivo CSV en la barra lateral.")
