@@ -15,21 +15,19 @@ import streamlit.components.v1 as components
 import tempfile
 import os
 
-# ==========================================
-# 1. CONFIGURACIÓN ESTILO (GEMINI UI)
-# ==========================================
+
 st.set_page_config(page_title="Analizador Semantico", layout="wide")
 
-# --- AQUÍ ESTÁ LA MAGIA DEL CSS ---
+
 st.markdown("""
 <style>
     /* 1. Ajuste general del contenedor */
     .block-container {padding-top: 2rem;}
     h1, h2, h3 {font-family: 'Sans-serif'; color: #202124;}
     
-    /* 2. ESTILO DE BOTONES "GEMINI" */
+
     
-    /* Botones de Acción Principal (Azules) */
+    
     div.stButton > button[kind="primary"] {
         background-color: #1A73E8; /* Azul Google */
         color: white;
@@ -48,7 +46,7 @@ st.markdown("""
         transform: translateY(-2px);
     }
 
-    /* Botones Secundarios (Borde gris) */
+    
     div.stButton > button[kind="secondary"] {
         background-color: white;
         color: #1A73E8;
@@ -63,7 +61,6 @@ st.markdown("""
         color: #174EA6;
     }
 
-    /* 3. Pestañas más limpias */
     .stTabs [data-baseweb="tab-list"] {gap: 8px;}
     .stTabs [data-baseweb="tab"] {
         height: 45px;
@@ -86,9 +83,7 @@ st.markdown("""
 st.title("Analizador Semantico")
 st.markdown("Suite para análisis de texto, detección de patrones y redes.")
 
-# ==========================================
-# 2. FUNCIONES DE CARGA (CACHÉ)
-# ==========================================
+#cache
 
 @st.cache_resource
 def cargar_spacy():
@@ -104,9 +99,7 @@ def cargar_modelo_sentimiento():
 def cargar_modelo_embeddings():
     return SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
 
-# ==========================================
-# 3. BARRA LATERAL (CONFIGURACIÓN FLEXIBLE)
-# ==========================================
+
 with st.sidebar:
     st.header("Configuracion del Dataset")
     archivo = st.file_uploader("1. Subir Archivo (CSV)", type=["csv"])
@@ -142,16 +135,14 @@ def get_stopwords():
     base = list(cargar_spacy().Defaults.stop_words) if cargar_spacy() else []
     return base + custom_stopwords
 
-# ==========================================
-# 4. LÓGICA PRINCIPAL
-# ==========================================
+#maincode
 if archivo and col_texto:
     df = df.dropna(subset=[col_texto])
     df[col_texto] = df[col_texto].astype(str)
 
     tabs = st.tabs(["Resumen Global", "Analisis de Sentimiento", "Frecuencia y Entidades", "Clusterizacion (Temas)", "Busqueda Inteligente", "Analisis de Redes"])
 
-    # --- TAB 1: RESUMEN ---
+#1
     with tabs[0]:
         c1, c2 = st.columns(2)
         c1.metric("Total de Documentos", len(df))
@@ -167,11 +158,9 @@ if archivo and col_texto:
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Selecciona una columna de agrupación en la barra lateral para ver estadísticas comparativas.")
-
-    # --- TAB 2: SENTIMIENTO ---
+#2
     with tabs[1]:
         st.subheader("Clasificacion Automatica de Tono")
-        # NOTA: Agregamos type="primary" para activar el estilo azul
         if st.button("Ejecutar Modelo de Sentimiento", type="primary"):
             with st.spinner("Procesando textos con IA..."):
                 tok, mod = cargar_modelo_sentimiento()
@@ -205,9 +194,9 @@ if archivo and col_texto:
                                         text_auto='.0f', aspect="auto", color_continuous_scale="RdBu", origin='lower',
                                         labels=dict(x="Sentimiento", y=col_cat, color="%")), use_container_width=True)
 
-    # --- TAB 3: LENGUAJE ---
+    #3
     with tabs[2]:
-        # Botón secundario (Estilo borde)
+        
         if st.button("Ejecutar Analisis de Frecuencia"):
             nlp = cargar_spacy()
             full_text = " ".join(df[col_texto].tolist())[:1000000]
@@ -229,10 +218,9 @@ if archivo and col_texto:
             else:
                 st.warning("No se detectaron entidades nombradas suficientes.")
 
-    # --- TAB 4: TEMAS Y ANOMALÍAS ---
+  #4
     with tabs[3]:
         st.subheader("Deteccion de Patrones")
-        # Botón primario (Azul)
         if st.button("Detectar Clusters y Outliers", type="primary"):
             with st.spinner("Entrenando modelo de clustering..."):
                 topic_model = BERTopic(language="multilingual", min_topic_size=5)
@@ -258,8 +246,7 @@ if archivo and col_texto:
                 with st.expander("Ver datos anomalos"):
                     cols_to_show = [col_texto] + ([col_cat] if col_cat != "No aplicar" else [])
                     st.dataframe(outliers[cols_to_show])
-
-    # --- TAB 5: BUSCADOR ---
+#5
     with tabs[4]:
         st.subheader("Motor de Busqueda Semantica")
         
@@ -287,12 +274,11 @@ if archivo and col_texto:
                     </div>
                     """, unsafe_allow_html=True)
 
-    # --- TAB 6: REDES ---
+   #6
     with tabs[5]:
         st.subheader("Relaciones entre Entidades")
         st.markdown("Grafo de co-ocurrencia: Entidades que aparecen juntas en el mismo texto.")
 
-        # Botón primario
         if st.button("Generar Grafo", type="primary"):
             with st.spinner("Procesando red..."):
                 nlp = cargar_spacy()
