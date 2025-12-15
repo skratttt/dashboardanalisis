@@ -23,7 +23,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📈 Dashboard de Análisis de Prensa")
+st.title("📈 Dashboard de Análisis")
 st.markdown("Herramienta de inteligencia de datos para auditoría de medios y detección de tendencias (Sin análisis temporal).")
 
 # ==========================================
