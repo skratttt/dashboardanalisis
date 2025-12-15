@@ -18,7 +18,7 @@ import os
 # ==========================================
 # 1. CONFIGURACIÓN ESTILO (GEMINI UI)
 # ==========================================
-st.set_page_config(page_title="Universal Text Analyzer", layout="wide")
+st.set_page_config(page_title="Analisis de texto", layout="wide")
 
 st.markdown("""
 <style>
@@ -75,8 +75,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Universal Text Analyzer")
-st.markdown("Suite de ingeniería de datos completa: Sentimiento, Entidades, N-Gramas, Temas y Redes.")
+st.title("Analisis de texto")
+st.markdown("Suite de analisis de Sentimiento, Entidades, N-Gramas, Temas y Redes.")
 
 # ==========================================
 # 2. FUNCIONES DE CARGA (CACHÉ)
