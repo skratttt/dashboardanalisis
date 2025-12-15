@@ -18,7 +18,7 @@ import os
 # ==========================================
 # 1. CONFIGURACIÓN ESTILO
 # ==========================================
-st.set_page_config(page_title="Data Intelligence Suite", layout="wide")
+st.set_page_config(page_title="Analisis De Datos FabricaChile", layout="wide")
 
 st.markdown("""
 <style>
