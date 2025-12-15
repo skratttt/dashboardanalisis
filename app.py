@@ -16,7 +16,7 @@ import tempfile
 import os
 
 
-st.set_page_config(page_title="Universal Text Analyzer", layout="wide")
+st.set_page_config(page_title="Analisis Semantico", layout="wide")
 
 st.markdown("""
 <style>
@@ -72,8 +72,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Universal Text Analyzer")
-st.markdown("Suite de ingeniería de datos completa: Sentimiento, Entidades, N-Gramas, Temas y Redes.")
+st.title("Analisis Semantico")
+st.markdown("Suite  analis de Sentimiento, Entidades, N-Gramas, Temas y Redes.")
 
 
 
