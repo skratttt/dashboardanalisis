@@ -16,22 +16,75 @@ import tempfile
 import os
 
 # ==========================================
-# 1. CONFIGURACIÓN ESTILO
+# 1. CONFIGURACIÓN ESTILO (GEMINI UI)
 # ==========================================
-st.set_page_config(page_title="Analisis De Datos FabricaChile", layout="wide")
+st.set_page_config(page_title="Universal Text Analyzer", layout="wide")
 
+# --- AQUÍ ESTÁ LA MAGIA DEL CSS ---
 st.markdown("""
 <style>
-    .block-container {padding-top: 1rem;}
-    h1 {color: #0e1117;}
-    .stTabs [data-baseweb="tab-list"] {gap: 10px;}
-    .stTabs [data-baseweb="tab"] {height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 4px 4px 0px 0px; gap: 1px; padding-top: 10px; padding-bottom: 10px;}
-    .stTabs [aria-selected="true"] {background-color: #ffffff; border-bottom: 2px solid #000000;}
+    /* 1. Ajuste general del contenedor */
+    .block-container {padding-top: 2rem;}
+    h1, h2, h3 {font-family: 'Sans-serif'; color: #202124;}
+    
+    /* 2. ESTILO DE BOTONES "GEMINI" */
+    
+    /* Botones de Acción Principal (Azules) */
+    div.stButton > button[kind="primary"] {
+        background-color: #1A73E8; /* Azul Google */
+        color: white;
+        border: none;
+        border-radius: 24px; /* Borde muy redondeado (Pastilla) */
+        padding: 0.6rem 1.5rem;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+        transition: all 0.3s cubic-bezier(.25,.8,.25,1);
+    }
+    
+    div.stButton > button[kind="primary"]:hover {
+        background-color: #174EA6; /* Azul más oscuro al pasar mouse */
+        box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22);
+        transform: translateY(-2px);
+    }
+
+    /* Botones Secundarios (Borde gris) */
+    div.stButton > button[kind="secondary"] {
+        background-color: white;
+        color: #1A73E8;
+        border: 1px solid #dadce0;
+        border-radius: 24px;
+        font-weight: 600;
+    }
+    
+    div.stButton > button[kind="secondary"]:hover {
+        background-color: #F8F9FA;
+        border-color: #1A73E8;
+        color: #174EA6;
+    }
+
+    /* 3. Pestañas más limpias */
+    .stTabs [data-baseweb="tab-list"] {gap: 8px;}
+    .stTabs [data-baseweb="tab"] {
+        height: 45px;
+        white-space: pre-wrap;
+        background-color: #ffffff;
+        border-radius: 20px;
+        gap: 1px;
+        padding: 0px 20px;
+        color: #5f6368;
+        border: 1px solid #f0f2f6;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #e8f0fe;
+        color: #1A73E8;
+        border: 1px solid #1A73E8;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Analisis De Datos FabricaChile")
-st.markdown("Plataforma para análisis.")
+st.title("Universal Text Analyzer")
+st.markdown("Suite de ingeniería de datos para análisis de texto no estructurado, detección de patrones y redes.")
 
 # ==========================================
 # 2. FUNCIONES DE CARGA (CACHÉ)
@@ -49,33 +102,45 @@ def cargar_modelo_sentimiento():
 
 @st.cache_resource
 def cargar_modelo_embeddings():
-    # Modelo ligero para búsqueda semántica
     return SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
 
-# Stopwords
-STOPWORDS_ES = list(cargar_spacy().Defaults.stop_words) + ['chile', 'chileno', 'chilena', 'noticia', 'hoy', 'ayer', 'tras', 'hacia', 'según', 'dice', 'ser', 'parte', 'nuevo']
-
 # ==========================================
-# 3. BARRA LATERAL
+# 3. BARRA LATERAL (CONFIGURACIÓN FLEXIBLE)
 # ==========================================
 with st.sidebar:
-    st.header("Carga de Datos")
-    archivo = st.file_uploader("Sube Dataset (CSV)", type=["csv"])
+    st.header("Configuracion del Dataset")
+    archivo = st.file_uploader("1. Subir Archivo (CSV)", type=["csv"])
     
     col_texto = None
-    col_medio = None
+    col_cat = None
+    custom_stopwords = []
 
     if archivo:
         try:
             df = pd.read_csv(archivo)
             st.success(f"Registros cargados: {len(df)}")
             cols = df.columns.tolist()
-            idx_txt = cols.index('titulo') if 'titulo' in cols else 0
-            col_texto = st.selectbox("Columna Texto", cols, index=idx_txt)
-            idx_med = cols.index('medio') if 'medio' in cols else 0
-            col_medio = st.selectbox("Columna Medio (Opcional)", ["No disponible"] + cols, index=idx_med + 1)
+            
+            idx_txt = 0
+            for possible in ['texto', 'text', 'comentario', 'mensaje', 'descripcion', 'titulo']:
+                if possible in cols:
+                    idx_txt = cols.index(possible)
+                    break
+            col_texto = st.selectbox("2. Columna de TEXTO a analizar", cols, index=idx_txt)
+            
+            st.info("Opcional: Selecciona una columna para agrupar.")
+            col_cat = st.selectbox("3. Columna de AGRUPACIÓN", ["No aplicar"] + cols)
+
+            st.header("Filtros de Texto")
+            stopwords_input = st.text_area("Palabras a ignorar (separadas por coma)", "el, la, los, un, una, de, del, y, o, que, por, para, con, se, su")
+            custom_stopwords = [x.strip() for x in stopwords_input.split(",")]
+            
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error al leer archivo: {e}")
+
+def get_stopwords():
+    base = list(cargar_spacy().Defaults.stop_words) if cargar_spacy() else []
+    return base + custom_stopwords
 
 # ==========================================
 # 4. LÓGICA PRINCIPAL
@@ -84,28 +149,35 @@ if archivo and col_texto:
     df = df.dropna(subset=[col_texto])
     df[col_texto] = df[col_texto].astype(str)
 
-    # Definir pestañas (Sin Emojis)
-    tabs = st.tabs(["Resumen", "Sentimiento", "Lenguaje", "Temas y Anomalias", "Buscador Semantico", "Analisis de Redes"])
+    tabs = st.tabs(["Resumen Global", "Analisis de Sentimiento", "Frecuencia y Entidades", "Clusterizacion (Temas)", "Busqueda Inteligente", "Analisis de Redes"])
 
     # --- TAB 1: RESUMEN ---
     with tabs[0]:
         c1, c2 = st.columns(2)
-        c1.metric("Volumen Total", len(df))
-        if col_medio != "No disponible":
-            c2.metric("Medios Monitoreados", df[col_medio].nunique())
-            conteo = df[col_medio].value_counts().reset_index()
-            conteo.columns = ['Medio', 'Count']
-            fig = px.bar(conteo.head(15), x='Count', y='Medio', orientation='h', title="Distribución por Medio")
+        c1.metric("Total de Documentos", len(df))
+        
+        if col_cat != "No aplicar":
+            c2.metric(f"Total de {col_cat} únicos", df[col_cat].nunique())
+            conteo = df[col_cat].value_counts().reset_index()
+            conteo.columns = ['Categoria', 'Count']
+            
+            fig = px.bar(conteo.head(20), x='Count', y='Categoria', orientation='h', 
+                         title=f"Distribución por {col_cat}", text_auto=True)
             fig.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Selecciona una columna de agrupación en la barra lateral para ver estadísticas comparativas.")
 
     # --- TAB 2: SENTIMIENTO ---
     with tabs[1]:
-        if st.button("Ejecutar Analisis de Sentimiento", type="primary"):
-            with st.spinner("Procesando..."):
+        st.subheader("Clasificacion Automatica de Tono")
+        # NOTA: Agregamos type="primary" para activar el estilo azul
+        if st.button("Ejecutar Modelo de Sentimiento", type="primary"):
+            with st.spinner("Procesando textos con IA..."):
                 tok, mod = cargar_modelo_sentimiento()
+                
                 def predict(txts):
-                    inp = tok(txts, return_tensors="pt", padding=True, truncation=True, max_length=64).to("cpu")
+                    inp = tok(txts, return_tensors="pt", padding=True, truncation=True, max_length=128).to("cpu")
                     with torch.no_grad(): out = mod(**inp)
                     return ["Positivo" if p[1]>p[0] else "Negativo" for p in torch.softmax(out.logits, dim=1)]
                 
@@ -119,100 +191,113 @@ if archivo and col_texto:
                 df['Sentimiento'] = res
                 
                 c1, c2 = st.columns([1, 2])
-                with c1: st.plotly_chart(px.pie(df, names='Sentimiento', title="Global", color='Sentimiento', color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}), use_container_width=True)
+                with c1: 
+                    st.plotly_chart(px.pie(df, names='Sentimiento', title="Distribucion Global", 
+                                    color='Sentimiento', color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}), use_container_width=True)
                 with c2:
-                    if col_medio != "No disponible":
-                        df_f = df[df[col_medio].isin(df[col_medio].value_counts()[lambda x: x>2].index)]
-                        st.plotly_chart(px.imshow(pd.crosstab(df_f[col_medio], df_f['Sentimiento'], normalize='index')*100, text_auto='.0f', aspect="auto", color_continuous_scale="RdBu", origin='lower'), use_container_width=True)
+                    if col_cat != "No aplicar":
+                        val_counts = df[col_cat].value_counts()
+                        top_cats = val_counts[val_counts > 1].index
+                        df_f = df[df[col_cat].isin(top_cats)]
+                        
+                        st.subheader(f"Sentimiento por {col_cat}")
+                        st.plotly_chart(px.imshow(pd.crosstab(df_f[col_cat], df_f['Sentimiento'], normalize='index')*100, 
+                                        text_auto='.0f', aspect="auto", color_continuous_scale="RdBu", origin='lower',
+                                        labels=dict(x="Sentimiento", y=col_cat, color="%")), use_container_width=True)
 
     # --- TAB 3: LENGUAJE ---
     with tabs[2]:
-        if st.button("Ejecutar Analisis de Entidades"):
+        # Botón secundario (Estilo borde)
+        if st.button("Ejecutar Analisis de Frecuencia"):
             nlp = cargar_spacy()
-            doc = nlp(" ".join(df[col_texto].tolist())[:1000000])
+            full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            ents = [e.text for e in doc.ents if len(e.text)>2 and e.label_ in ["PER", "ORG", "LOC"]]
-            counts = pd.Series(ents).value_counts().head(15).sort_values()
-            st.plotly_chart(px.bar(x=counts.values, y=counts.index, orientation='h', title="Top Entidades Detectadas"), use_container_width=True)
+            st.subheader("Mapa de Conceptos Clave")
+            wc = WordCloud(width=800, height=300, background_color='white', stopwords=get_stopwords(), colormap='viridis').generate(full_text)
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.imshow(wc, interpolation='bilinear')
+            ax.axis('off')
+            st.pyplot(fig)
+            plt.close()
 
-    # --- TAB 4: TEMAS Y OUTLIERS ---
+            st.subheader("Entidades Detectadas")
+            doc = nlp(full_text)
+            ents = [e.text for e in doc.ents if len(e.text)>2 and e.label_ in ["PER", "ORG", "LOC"]]
+            if ents:
+                counts = pd.Series(ents).value_counts().head(15).sort_values()
+                st.plotly_chart(px.bar(x=counts.values, y=counts.index, orientation='h', title="Top Entidades"), use_container_width=True)
+            else:
+                st.warning("No se detectaron entidades nombradas suficientes.")
+
+    # --- TAB 4: TEMAS Y ANOMALÍAS ---
     with tabs[3]:
-        st.subheader("Modelado de Topicos (Clustering) + Deteccion de Anomalias")
-        if st.button("Detectar Temas y Anomalias", type="primary"):
-            with st.spinner("Entrenando modelo..."):
+        st.subheader("Deteccion de Patrones")
+        # Botón primario (Azul)
+        if st.button("Detectar Clusters y Outliers", type="primary"):
+            with st.spinner("Entrenando modelo de clustering..."):
                 topic_model = BERTopic(language="multilingual", min_topic_size=5)
                 topics, probs = topic_model.fit_transform(df[col_texto].tolist())
-                df['Tema'] = topics
+                df['Cluster_ID'] = topics
                 
-                # SECCIÓN 1: TEMAS PRINCIPALES
                 freq = topic_model.get_topic_info()
                 freq_clean = freq[freq['Topic'] != -1].head(10)
                 freq_clean['Nombre'] = freq_clean['Name'].apply(lambda x: " ".join(x.split("_")[1:4]))
                 
                 c1, c2 = st.columns([2, 1])
                 with c1:
-                    st.plotly_chart(px.bar(freq_clean, x='Nombre', y='Count', title="Temas Principales", color='Count'), use_container_width=True)
+                    st.plotly_chart(px.bar(freq_clean, x='Nombre', y='Count', title="Grupos Principales", color='Count'), use_container_width=True)
                 with c2:
-                    st.info("Mapa de Distancia Inter-Topicos")
+                    st.info("Mapa de Similitud")
                     st.plotly_chart(topic_model.visualize_topics(), use_container_width=True)
 
                 st.markdown("---")
-                
-                # SECCIÓN 2: DETECTOR DE OUTLIERS
-                st.subheader("Detector de Anomalias (Outliers)")
-                st.markdown("""
-                Las noticias clasificadas como **Topico -1** son ruido o **anomalias**: textos que no encajan en ningun patron comun. 
-                """)
-                
-                outliers = df[df['Tema'] == -1]
-                st.metric("Cantidad de Anomalias Detectadas", len(outliers))
-                
-                with st.expander(f"Ver lista de las {len(outliers)} noticias anomalas"):
-                    st.dataframe(outliers[[col_texto] + ([col_medio] if col_medio != "No disponible" else [])])
+                st.subheader("Registros Anomalos (Outliers)")
+                st.markdown("Textos que no encajan en ningun cluster identificado.")
+                outliers = df[df['Cluster_ID'] == -1]
+                st.metric("Cantidad de Outliers", len(outliers))
+                with st.expander("Ver datos anomalos"):
+                    cols_to_show = [col_texto] + ([col_cat] if col_cat != "No aplicar" else [])
+                    st.dataframe(outliers[cols_to_show])
 
-    # --- TAB 5: BUSCADOR SEMÁNTICO ---
+    # --- TAB 5: BUSCADOR ---
     with tabs[4]:
-        st.subheader("Buscador Semantico Neural")
-        st.markdown("Busqueda por contexto y significado.")
+        st.subheader("Motor de Busqueda Semantica")
         
-        query = st.text_input("Ingrese consulta:", placeholder="Ej: Crisis de seguridad, corrupcion, innovacion tecnologica...")
-        top_k = st.slider("Resultados", 3, 20, 5)
-
+        query = st.text_input("Consulta:", placeholder="Ej: Problemas de infraestructura, retrasos...")
+        
         if query:
             with st.spinner("Calculando similitud..."):
                 model_emb = cargar_modelo_embeddings()
-                # Encoding
                 corpus_emb = model_emb.encode(df[col_texto].tolist(), convert_to_tensor=True)
                 query_emb = model_emb.encode(query, convert_to_tensor=True)
                 
-                # Cosine Similarity
-                hits = util.semantic_search(query_emb, corpus_emb, top_k=top_k)[0]
+                hits = util.semantic_search(query_emb, corpus_emb, top_k=5)[0]
                 
-                st.markdown("### Resultados Relevantes")
+                st.markdown("### Resultados")
                 for hit in hits:
                     idx = hit['corpus_id']
                     score = hit['score']
                     txt = df.iloc[idx][col_texto]
-                    src = df.iloc[idx][col_medio] if col_medio != "No disponible" else "N/A"
+                    cat_val = df.iloc[idx][col_cat] if col_cat != "No aplicar" else "-"
                     
                     st.markdown(f"""
-                    <div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #333;">
-                        <small><b>Relevancia: {score:.2f}</b> | {src}</small><br>
-                        {txt}
+                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #e0e0e0;">
+                        <small style="color: #1A73E8;"><b>Relevancia: {score:.2f}</b> | {cat_val}</small><br>
+                        <span style="color: #202124;">{txt}</span>
                     </div>
                     """, unsafe_allow_html=True)
 
-    # --- TAB 6: ANÁLISIS DE REDES ---
+    # --- TAB 6: REDES ---
     with tabs[5]:
-        st.subheader("Grafo de Conexiones (Network Analysis)")
-        st.markdown("Visualizacion de relaciones entre entidades (Personas y Organizaciones).")
+        st.subheader("Relaciones entre Entidades")
+        st.markdown("Grafo de co-ocurrencia: Entidades que aparecen juntas en el mismo texto.")
 
-        if st.button("Generar Red de Conexiones"):
-            with st.spinner("Construyendo grafo..."):
+        # Botón primario
+        if st.button("Generar Grafo", type="primary"):
+            with st.spinner("Procesando red..."):
                 nlp = cargar_spacy()
-                
-                # 1. Extraer entidades
-                docs = list(nlp.pipe(df[col_texto].head(1000).astype(str), disable=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"]))
+                sample_df = df.head(1000)
+                docs = list(nlp.pipe(sample_df[col_texto].astype(str), disable=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"]))
                 
                 entity_list = []
                 for doc in docs:
@@ -220,7 +305,6 @@ if archivo and col_texto:
                     if len(ents) > 1:
                         entity_list.append(ents)
 
-                # 2. Construir Grafo
                 G = nx.Graph()
                 co_occurrences = {}
                 node_counts = {}
@@ -232,17 +316,15 @@ if archivo and col_texto:
                             pair = tuple(sorted((ents[i], ents[j])))
                             co_occurrences[pair] = co_occurrences.get(pair, 0) + 1
 
-                # Filtro Top 40
                 top_nodes = sorted(node_counts, key=node_counts.get, reverse=True)[:40]
                 
                 for node in top_nodes:
-                    G.add_node(node, size=node_counts[node]*2, title=f"Menciones: {node_counts[node]}", group=1)
+                    G.add_node(node, size=node_counts[node]*2, title=f"Frecuencia: {node_counts[node]}")
                 
                 for (source, target), weight in co_occurrences.items():
                     if source in top_nodes and target in top_nodes:
                         G.add_edge(source, target, value=weight, title=f"Co-ocurrencias: {weight}")
 
-                # 3. Visualizar
                 if len(G.nodes) > 0:
                     net = Network(height="600px", width="100%", bgcolor="#ffffff", font_color="black")
                     net.from_nx(G)
@@ -253,11 +335,10 @@ if archivo and col_texto:
                         tmp.seek(0)
                         html_bytes = tmp.read()
                     
-                    st.success(f"Grafo generado: {len(G.nodes)} nodos.")
                     components.html(html_bytes.decode(), height=600, scrolling=True)
                     os.unlink(tmp.name)
                 else:
-                    st.warning("No hay suficientes datos para generar el grafo.")
+                    st.warning("No se encontraron suficientes relaciones para generar el grafo.")
 
 else:
-    st.info("Sube tu archivo CSV para comenzar.")
+    st.info("Sube un archivo CSV para comenzar. Asegurate de que tenga una columna de texto.")
