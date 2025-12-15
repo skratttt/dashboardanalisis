@@ -24,7 +24,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("📈 Dashboard de Análisis")
-st.markdown("Herramienta de inteligencia de datos para auditoría de medios y detección de tendencias (Sin análisis temporal).")
+st.markdown("Herramienta de inteligencia de datos para auditoría de medios y detección de tendencias.")
 
 # ==========================================
 # 2. FUNCIONES DE CARGA Y PROCESAMIENTO
@@ -52,10 +52,11 @@ def get_top_ngrams(corpus, n=2, top_k=15):
     return pd.DataFrame(words_freq[:top_k], columns=['Frase', 'Frecuencia'])
 
 # Stopwords personalizadas
+# Puedes agregar más palabras aquí si ves que ensucian la nube
 STOPWORDS_ES = list(cargar_spacy().Defaults.stop_words) + [
     'chile', 'chileno', 'chilena', 'tras', 'hacia', 'según', 'foto', 'video', 'clic', 'aquí', 'noticia', 
     'hoy', 'ayer', 'mañana', 'año', 'años', 'dice', 'ser', 'dijo', 'señaló', 'millones', 'peso', 'pesos',
-    'parte', 'gran', 'nuevo', 'nueva', 'frente'
+    'parte', 'gran', 'nuevo', 'nueva', 'frente', 'hacer', 'hace', 'puede', 'forma'
 ]
 
 # ==========================================
@@ -83,7 +84,7 @@ with st.sidebar:
             
             # Intenta adivinar la columna de medio
             idx_medio = cols.index('medio') if 'medio' in cols else 0
-            col_medio = st.selectbox("Columna de MEDIO (Opcional)", ["No disponible"] + cols, index=idx_medio + 1) # +1 para compensar el 'No disponible'
+            col_medio = st.selectbox("Columna de MEDIO (Opcional)", ["No disponible"] + cols, index=idx_medio + 1)
         except Exception as e:
             st.error(f"Error leyendo el archivo: {e}")
 
@@ -98,14 +99,12 @@ if archivo and col_texto:
     
     # --- PESTAÑAS ---
     tab_resumen, tab_sentimiento, tab_lenguaje, tab_clusters = st.tabs([
-        " Resumen General", " Radiografía Emocional", "Análisis de Lenguaje", " Temas (Clustering)"
+        " Resumen General", "Radiografía Emocional", "Análisis de Lenguaje", "Temas (Clustering)"
     ])
 
-    # === PESTAÑA 1: RESUMEN GENERAL (METRICAS) ===
+    # === PESTAÑA 1: RESUMEN GENERAL ===
     with tab_resumen:
         st.subheader("Datos Generales del Dataset")
-        
-        # Métricas clave en columnas grandes
         c1, c2, c3 = st.columns(3)
         c1.metric("Total Noticias Analizadas", len(df))
         
@@ -119,20 +118,17 @@ if archivo and col_texto:
             
             st.markdown("---")
             st.subheader("Participación por Medio")
-            # Gráfico de barras simple de cuántas noticias tiene cada medio
             conteo_medios = df[col_medio].value_counts().reset_index()
             conteo_medios.columns = ['Medio', 'Noticias']
             fig_medios = px.bar(conteo_medios.head(15), x='Noticias', y='Medio', orientation='h', 
                                 title="Top 15 Medios con más noticias", color='Noticias', color_continuous_scale='Blues')
             fig_medios.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig_medios, use_container_width=True)
-            
         else:
             c2.metric("Medios", "N/A")
-            c3.metric("Info", "Sin columna de medio")
             st.info("Para ver estadísticas por medio, selecciona la columna correspondiente en la barra lateral.")
 
-    # === PESTAÑA 2: SENTIMIENTO Y MEDIOS ===
+    # === PESTAÑA 2: SENTIMIENTO ===
     with tab_sentimiento:
         st.subheader("Análisis de Sentimiento (IA)")
         
@@ -140,16 +136,13 @@ if archivo and col_texto:
             with st.spinner('Analizando tono de las noticias...'):
                 tokenizer, model = cargar_modelo_sentimiento()
                 
-                # Función predicción optimizada
                 def predecir_batch(textos):
-                    # Max length reducido para velocidad
                     inputs = tokenizer(textos, return_tensors="pt", padding=True, truncation=True, max_length=64).to("cpu")
                     with torch.no_grad():
                         outputs = model(**inputs)
                     probs = torch.softmax(outputs.logits, dim=1)
                     return ["Positivo" if p[1] > p[0] else "Negativo" for p in probs]
 
-                # Procesar por lotes
                 batch_size = 32
                 todos_sents = []
                 textos = df[col_texto].tolist()
@@ -163,28 +156,20 @@ if archivo and col_texto:
                 df['Sentimiento'] = todos_sents
                 st.success("Análisis completado")
 
-                # 1. Gráfico Torta Global
                 c1, c2 = st.columns([1, 2])
                 with c1:
                     fig_pie = px.pie(df, names='Sentimiento', title="Distribución Global", 
                                      color='Sentimiento', color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'})
                     st.plotly_chart(fig_pie, use_container_width=True)
 
-                # 2. HEATMAP (MEDIO vs SENTIMIENTO)
                 with c2:
                     if col_medio != "No disponible":
                         st.subheader(" Mapa de Calor: Línea Editorial")
-                        st.markdown("¿Qué medios son más negativos o positivos?")
-                        
-                        # Filtramos medios con pocas noticias para no ensuciar el gráfico
                         conteo_minimo = 2
                         medios_validos = df[col_medio].value_counts()
                         medios_validos = medios_validos[medios_validos > conteo_minimo].index
                         df_filtrado = df[df[col_medio].isin(medios_validos)]
-                        
-                        # Crear tabla cruzada
                         cruce = pd.crosstab(df_filtrado[col_medio], df_filtrado['Sentimiento'], normalize='index') * 100
-                        
                         fig_heat = px.imshow(cruce, text_auto='.1f', aspect="auto",
                                              labels=dict(x="Sentimiento", y="Medio", color="%"),
                                              color_continuous_scale="RdBu", origin='lower')
@@ -192,21 +177,41 @@ if archivo and col_texto:
                     else:
                         st.info("Selecciona columna 'Medio' para ver el Mapa de Calor.")
 
-                # 3. Descarga
                 st.download_button("Descargar CSV con Sentimiento", df.to_csv(index=False), "datos_sentimiento.csv")
 
-    # === PESTAÑA 3: LENGUAJE Y ENTIDADES ===
+    # === PESTAÑA 3: LENGUAJE (AQUÍ ESTÁ LA NUEVA NUBE) ===
     with tab_lenguaje:
-        if st.button("Analizar Texto y Entidades"):
+        if st.button("▶️ Analizar Texto y Entidades"):
             nlp = cargar_spacy()
             
-            with st.spinner("Extrayendo entidades y n-gramas..."):
-                # Unir texto para análisis global
+            with st.spinner("Generando nube y extrayendo entidades..."):
+                # 1. Preparar texto completo
                 texto_total = " ".join(df[col_texto].astype(str).tolist())
-                # Limitamos caracteres para no colapsar la RAM si el archivo es gigante
+                
+                # --- NUEVA SECCIÓN: NUBE DE PALABRAS GENERAL ---
+                st.subheader(" Nube de Palabras Global")
+                st.markdown("Conceptos más repetidos en todo el dataset:")
+                
+                # Generamos la nube
+                wc_general = WordCloud(
+                    width=800, height=400, 
+                    background_color='white', 
+                    stopwords=STOPWORDS_ES,
+                    colormap='viridis',
+                    max_words=100
+                ).generate(texto_total[:2000000]) # Limitamos caracteres para proteger memoria
+
+                # Mostramos con Matplotlib
+                fig_wc, ax_wc = plt.subplots(figsize=(10, 5))
+                ax_wc.imshow(wc_general, interpolation='bilinear')
+                ax_wc.axis('off')
+                st.pyplot(fig_wc)
+                plt.close() # Cerramos figura para liberar memoria
+                # -----------------------------------------------
+
+                # 2. PROCESAMIENTO NLP (ENTIDADES)
                 doc = nlp(texto_total[:1000000]) 
 
-                # 1. TOP PERSONAS Y ORGS
                 personas = [ent.text for ent in doc.ents if ent.label_ == "PER" and len(ent.text) > 3]
                 orgs = [ent.text for ent in doc.ents if ent.label_ in ["ORG", "MISC"] and len(ent.text) > 2]
                 lugares = [ent.text for ent in doc.ents if ent.label_ in ["LOC", "GPE"] and len(ent.text) > 2]
@@ -218,6 +223,8 @@ if archivo and col_texto:
                                  labels={'x':'Menciones', 'y':''}, color_discrete_sequence=[color])
                     st.plotly_chart(fig, use_container_width=True)
 
+                st.markdown("---")
+                st.subheader("🕵️ Detección de Entidades")
                 c1, c2, c3 = st.columns(3)
                 with c1: plot_top_ent(personas, "Top Personajes", "#e74c3c")
                 with c2: plot_top_ent(orgs, "Top Organizaciones", "#3498db")
@@ -225,8 +232,8 @@ if archivo and col_texto:
 
                 st.markdown("---")
 
-                # 2. ANÁLISIS DE N-GRAMAS
-                st.subheader(" Frases más repetidas")
+                # 3. ANÁLISIS DE N-GRAMAS
+                st.subheader("🗣️ Frases más repetidas")
                 c_bi, c_tri = st.columns(2)
                 
                 with c_bi:
@@ -243,40 +250,33 @@ if archivo and col_texto:
                     fig_tri.update_layout(yaxis={'categoryorder':'total ascending'})
                     st.plotly_chart(fig_tri, use_container_width=True)
 
-    # === PESTAÑA 4: CLUSTERING (TEMAS) ===
+    # === PESTAÑA 4: CLUSTERING ===
     with tab_clusters:
-        st.subheader(" Descubrimiento de Temas (BERTopic)")
-        st.markdown("Agrupa noticias automáticamente sin necesidad de leerlas.")
-
+        st.subheader("Descubrimiento de Temas (BERTopic)")
+        
         if st.button("▶️ Generar Clusters (Puede tardar)", type="primary"):
             with st.spinner("Entrenando modelo de clustering..."):
                 topic_model = BERTopic(language="multilingual", min_topic_size=5)
-                # Convertimos a lista y aseguramos string
                 docs = df[col_texto].tolist()
                 topics, probs = topic_model.fit_transform(docs)
                 
                 freq = topic_model.get_topic_info()
                 df['Tema_ID'] = topics
                 
-                # 1. Gráfico de Barras: Noticias por Tema
                 st.subheader("Cantidad de Noticias por Tema")
                 freq_clean = freq[freq['Topic'] != -1].head(10)
-                # Limpiamos el nombre para que no sea tan largo
                 freq_clean['Nombre_Corto'] = freq_clean['Name'].apply(lambda x: "_".join(x.split("_")[1:3]))
                 
                 fig_bar = px.bar(freq_clean, x='Nombre_Corto', y='Count', 
                                  title="Temas Principales Detectados", 
                                  text_auto=True,
-                                 labels={'Nombre_Corto': 'Tema', 'Count': 'Cantidad de Noticias'},
                                  color='Count', color_continuous_scale='Purples')
                 st.plotly_chart(fig_bar, use_container_width=True)
 
-                # 2. Visualización de Burbujas
                 st.subheader("Mapa de Inter-distancia de Temas")
                 fig_map = topic_model.visualize_topics()
                 st.plotly_chart(fig_map, use_container_width=True)
 
-                # 3. Nubes de Palabras por Cluster
                 st.subheader("Nubes de Palabras por Grupo")
                 cols = st.columns(3)
                 top_clusters = freq_clean['Topic'].tolist()[:6] 
@@ -294,4 +294,4 @@ if archivo and col_texto:
                         plt.close()
 
 else:
-    st.info(" Comienza subiendo un archivo CSV en la barra lateral.")
+    st.info("👈 Comienza subiendo un archivo CSV en la barra lateral.")             
