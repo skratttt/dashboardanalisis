@@ -15,8 +15,10 @@ import streamlit.components.v1 as components
 import tempfile
 import os
 
-
-st.set_page_config(page_title="Analisis de texto universal", layout="wide")
+# ==========================================
+# 1. CONFIGURACIÓN ESTILO (GEMINI UI)
+# ==========================================
+st.set_page_config(page_title="Universal Text Analyzer", layout="wide")
 
 st.markdown("""
 <style>
@@ -76,7 +78,9 @@ st.markdown("""
 st.title("Universal Text Analyzer")
 st.markdown("Suite de ingeniería de datos completa: Sentimiento, Entidades, N-Gramas, Temas y Redes.")
 
-
+# ==========================================
+# 2. FUNCIONES DE CARGA (CACHÉ)
+# ==========================================
 
 @st.cache_resource
 def cargar_spacy():
@@ -106,7 +110,9 @@ def get_top_ngrams(corpus, n=2, top_k=10, stopwords=[]):
     words_freq = sorted(words_freq, key=lambda x: x[1], reverse=True)
     return pd.DataFrame(words_freq[:top_k], columns=['Frase', 'Frecuencia'])
 
-
+# ==========================================
+# 3. BARRA LATERAL
+# ==========================================
 with st.sidebar:
     st.header("Configuracion del Dataset")
     archivo = st.file_uploader("1. Subir Archivo (CSV)", type=["csv"])
@@ -138,7 +144,9 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Error al leer archivo: {e}")
 
-
+# ==========================================
+# 4. LÓGICA PRINCIPAL
+# ==========================================
 if archivo and col_texto:
     df = df.dropna(subset=[col_texto])
     df[col_texto] = df[col_texto].astype(str)
@@ -197,14 +205,14 @@ if archivo and col_texto:
                                         text_auto='.0f', aspect="auto", color_continuous_scale="RdBu", origin='lower',
                                         labels=dict(x="Sentimiento", y=col_cat, color="%")), use_container_width=True)
 
-    # --- TAB 3: LENGUAJE PROFUNDO  ---
+    # --- TAB 3: LENGUAJE PROFUNDO (MEJORADO) ---
     with tabs[2]:
         if st.button("Ejecutar Analisis Completo de Lenguaje"):
             nlp = cargar_spacy()
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
             # 1. NUBE DE PALABRAS
-            st.subheader(" Nube de Conceptos (WordCloud)")
+            st.subheader("☁️ Nube de Conceptos (WordCloud)")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4))
             ax.imshow(wc, interpolation='bilinear')
@@ -214,8 +222,8 @@ if archivo and col_texto:
 
             st.markdown("---")
 
-            # 2. ENTIDADES SEPARADAS 
-            st.subheader(" Deteccion de Entidades (NER)")
+            # 2. ENTIDADES SEPARADAS (DISEÑO MÁS GRANDE)
+            st.subheader("🕵️ Deteccion de Entidades (NER)")
             doc = nlp(full_text)
             
             # Filtramos por tipo
@@ -223,15 +231,18 @@ if archivo and col_texto:
             org = [e.text for e in doc.ents if e.label_ in ["ORG", "MISC"] and len(e.text)>2]
             loc = [e.text for e in doc.ents if e.label_ in ["LOC", "GPE"] and len(e.text)>2]
 
+            # Función helper para graficar con más altura y margen
             def plot_entity(lista, titulo, color):
                 if lista:
                     counts = pd.Series(lista).value_counts().head(10).sort_values()
                     fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, 
                                  color_discrete_sequence=[color])
+                    # AUMENTAMOS EL MARGEN IZQUIERDO PARA QUE SE LEAN LOS NOMBRES
                     fig.update_layout(showlegend=False, height=450, margin=dict(l=150))
                     return fig
                 return None
 
+            # NUEVO LAYOUT: 2 columnas arriba, 1 abajo (mucho más espacio)
             col_a, col_b = st.columns(2)
             
             with col_a: 
@@ -391,3 +402,7 @@ if archivo and col_texto:
 
 else:
     st.info("Sube un archivo CSV para comenzar.")
+
+
+
+
