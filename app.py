@@ -16,7 +16,7 @@ import tempfile
 import os
 
 
-st.set_page_config(page_title="Analisis Semantico", layout="wide")
+st.set_page_config(page_title="Analisis de texto universal", layout="wide")
 
 st.markdown("""
 <style>
@@ -54,26 +54,27 @@ st.markdown("""
         color: #174EA6;
     }
 
-    /* PESTAÑAS */
+    /* PESTAÑAS (Corrección de contraste) */
     .stTabs [data-baseweb="tab-list"] {gap: 8px;}
     .stTabs [data-baseweb="tab"] {
         height: 45px;
         background-color: #ffffff;
         border-radius: 20px;
         padding: 0px 20px;
-        color: #5f6368;
+        color: #5f6368; /* Color de texto más oscuro para que se lea bien */
         border: 1px solid #f0f2f6;
     }
     .stTabs [aria-selected="true"] {
         background-color: #e8f0fe;
         color: #1A73E8;
         border: 1px solid #1A73E8;
+        font-weight: bold;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Analisis Semantico")
-st.markdown("Suite  analis de Sentimiento, Entidades, N-Gramas, Temas y Redes.")
+st.title("Universal Text Analyzer")
+st.markdown("Suite de ingeniería de datos completa: Sentimiento, Entidades, N-Gramas, Temas y Redes.")
 
 
 
@@ -145,6 +146,7 @@ if archivo and col_texto:
 
     tabs = st.tabs(["Resumen Global", "Analisis de Sentimiento", "Lenguaje Profundo", "Clusterizacion (Temas)", "Busqueda", "Redes"])
 
+    # --- TAB 1: RESUMEN ---
     with tabs[0]:
         c1, c2 = st.columns(2)
         c1.metric("Total de Documentos", len(df))
@@ -161,6 +163,7 @@ if archivo and col_texto:
         else:
             st.info("Selecciona una columna de agrupación para ver estadísticas.")
 
+    # --- TAB 2: SENTIMIENTO ---
     with tabs[1]:
         st.subheader("Clasificacion de Tono")
         if st.button("Ejecutar Modelo de Sentimiento", type="primary"):
@@ -194,11 +197,13 @@ if archivo and col_texto:
                                         text_auto='.0f', aspect="auto", color_continuous_scale="RdBu", origin='lower',
                                         labels=dict(x="Sentimiento", y=col_cat, color="%")), use_container_width=True)
 
+    # --- TAB 3: LENGUAJE PROFUNDO  ---
     with tabs[2]:
         if st.button("Ejecutar Analisis Completo de Lenguaje"):
             nlp = cargar_spacy()
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
+            # 1. NUBE DE PALABRAS
             st.subheader(" Nube de Conceptos (WordCloud)")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4))
@@ -209,42 +214,45 @@ if archivo and col_texto:
 
             st.markdown("---")
 
+            # 2. ENTIDADES SEPARADAS 
             st.subheader(" Deteccion de Entidades (NER)")
             doc = nlp(full_text)
             
+            # Filtramos por tipo
             per = [e.text for e in doc.ents if e.label_ == "PER" and len(e.text)>3]
             org = [e.text for e in doc.ents if e.label_ in ["ORG", "MISC"] and len(e.text)>2]
             loc = [e.text for e in doc.ents if e.label_ in ["LOC", "GPE"] and len(e.text)>2]
 
-            c1, c2, c3 = st.columns(3)
-            
             def plot_entity(lista, titulo, color):
                 if lista:
                     counts = pd.Series(lista).value_counts().head(10).sort_values()
                     fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, 
                                  color_discrete_sequence=[color])
-                    fig.update_layout(showlegend=False, height=300)
+                    fig.update_layout(showlegend=False, height=450, margin=dict(l=150))
                     return fig
                 return None
 
-            with c1: 
+            col_a, col_b = st.columns(2)
+            
+            with col_a: 
                 fig = plot_entity(per, "Top Personas", "#4285F4") # Azul
                 if fig: st.plotly_chart(fig, use_container_width=True)
                 else: st.info("Sin Personas")
 
-            with c2: 
+            with col_b: 
                 fig = plot_entity(org, "Top Organizaciones", "#EA4335") # Rojo
                 if fig: st.plotly_chart(fig, use_container_width=True)
                 else: st.info("Sin Organizaciones")
 
-            with c3: 
-                fig = plot_entity(loc, "Top Lugares", "#34A853") # Verde
-                if fig: st.plotly_chart(fig, use_container_width=True)
-                else: st.info("Sin Lugares")
+            # Lugares en ancho completo para que se vea bien
+            fig_loc = plot_entity(loc, "Top Lugares", "#34A853") # Verde
+            if fig_loc: st.plotly_chart(fig_loc, use_container_width=True)
+            else: st.info("Sin Lugares")
 
             st.markdown("---")
 
-            st.subheader(" Frases Recurrentes (N-Gramas)")
+            # 3. N-GRAMAS
+            st.subheader("🗣️ Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             
             with c_bi:
@@ -263,6 +271,7 @@ if archivo and col_texto:
                     st.plotly_chart(fig_tri, use_container_width=True)
                 except: st.warning("No hay suficientes datos para Trigramas")
 
+    # --- TAB 4: TEMAS ---
     with tabs[3]:
         st.subheader("Deteccion de Patrones")
         if st.button("Detectar Clusters y Outliers", type="primary"):
@@ -284,6 +293,7 @@ if archivo and col_texto:
 
                 st.markdown("---")
                 
+                # NUBES POR CLUSTER
                 st.subheader("Nubes de Palabras por Grupo")
                 cols = st.columns(3)
                 top_clusters = freq_clean['Topic'].tolist()[:6]
@@ -308,6 +318,7 @@ if archivo and col_texto:
                     cols_to_show = [col_texto] + ([col_cat] if col_cat != "No aplicar" else [])
                     st.dataframe(outliers[cols_to_show])
 
+    # --- TAB 5: BUSCADOR ---
     with tabs[4]:
         st.subheader("Motor de Busqueda Semantica")
         query = st.text_input("Consulta:", placeholder="Ej: Problemas de infraestructura...")
@@ -332,6 +343,7 @@ if archivo and col_texto:
                     </div>
                     """, unsafe_allow_html=True)
 
+    # --- TAB 6: REDES ---
     with tabs[5]:
         st.subheader("Relaciones entre Entidades")
         if st.button("Generar Grafo", type="primary"):
