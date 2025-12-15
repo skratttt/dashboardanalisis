@@ -30,7 +30,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("nalisis De Datos FabricaChile")
+st.title("Analisis De Datos FabricaChile")
 st.markdown("Plataforma para análisis.")
 
 # ==========================================
