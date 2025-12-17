@@ -203,7 +203,7 @@ if archivo and col_texto:
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
             # 1. NUBE DE PALABRAS
-            st.subheader("☁️ Nube de Conceptos (WordCloud)")
+            st.subheader(" Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4))
             ax.imshow(wc, interpolation='bilinear')
@@ -214,7 +214,7 @@ if archivo and col_texto:
             st.markdown("---")
 
             
-            st.subheader("🕵️ Deteccion de Entidades (NER)")
+            st.subheader("Deteccion de Entidades (NER)")
             doc = nlp(full_text)
             
             per = [e.text for e in doc.ents if e.label_ == "PER" and len(e.text)>3]
@@ -248,7 +248,7 @@ if archivo and col_texto:
 
             st.markdown("---")
 
-            st.subheader("🗣️ Frases Recurrentes (N-Gramas)")
+            st.subheader("Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             
             with c_bi:
