@@ -191,10 +191,14 @@ if archivo and col_texto:
             st.info("Selecciona una columna de agrupación para ver estadísticas.")
 
     # ---------------- TAB 2: SENTIMIENTO ----------------
+    # ---------------- TAB 2: SENTIMIENTO (CORREGIDO) ----------------
     with tabs[1]:
         st.subheader("Clasificacion de Tono")
+        
+        # Botón para activar el proceso
         if st.button("Ejecutar Modelo de Sentimiento", type="primary"):
             with st.spinner("Procesando..."):
+                # 1. Carga y Predicción
                 tok, mod = cargar_modelo_sentimiento()
                 
                 def predict(txts):
@@ -206,51 +210,54 @@ if archivo and col_texto:
                 bs = 32
                 prog = st.progress(0)
                 txts = df[col_texto].tolist()
+                
                 for i in range(0, len(txts), bs):
                     res.extend(predict(txts[i:i+bs]))
                     prog.progress(min((i+bs)/len(txts), 1.0))
+                
                 df['Sentimiento'] = res
                 
+                # 2. Visualización (Columnas)
                 c1, c2 = st.columns([1, 2])
+                
+                # Columna Izquierda: Torta Global
                 with c1: 
                     st.plotly_chart(px.pie(df, names='Sentimiento', title="Distribucion Global", 
-                                    color='Sentimiento', color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}), use_container_width=True)
-              
-               with c2:
+                                    color='Sentimiento', 
+                                    color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}), 
+                                    use_container_width=True)
+                
+                # Columna Derecha: Barras Apiladas (El gráfico nuevo)
+                with c2:
                     if col_cat != "No aplicar":
-                        # 1. Filtrar categorías con pocos datos (ruido)
+                        # A. Filtrar categorías pequeñas
                         val_counts = df[col_cat].value_counts()
-                        top_cats = val_counts[val_counts > 5].index # Solo categorías con más de 5 datos
+                        top_cats = val_counts[val_counts > 5].index 
                         df_f = df[df[col_cat].isin(top_cats)]
                         
-                        # 2. Calcular porcentajes manualmente para el gráfico
-                        # Agrupamos por Medio y Sentimiento
+                        # B. Calcular porcentajes
                         df_grouped = df_f.groupby([col_cat, 'Sentimiento']).size().reset_index(name='Conteo')
-                        # Calculamos el % del total por cada Medio
                         df_grouped['Porcentaje'] = df_grouped.groupby(col_cat)['Conteo'].transform(lambda x: 100 * x / x.sum())
                         
-                        # 3. Gráfico de Barras Apiladas
+                        # C. Crear Gráfico
                         fig = px.bar(
                             df_grouped, 
                             x="Porcentaje", 
                             y=col_cat, 
                             color="Sentimiento", 
                             orientation='h',
-                            text_auto='.0f', # Muestra el número sin decimales
+                            text_auto='.0f', 
                             title=f"Comparativa de Sentimiento por {col_cat}",
-                            # Colores semánticos: Rojo para negativo, Verde para positivo
                             color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}
                         )
                         
-                        # Limpieza visual
+                        # D. Estilo Limpio
                         fig.update_layout(
                             xaxis_title="% del Total",
                             yaxis_title="",
                             legend_title=dict(text=""),
-                            # Ordenar barras por cantidad de negativos (opcional, para ranking)
                             yaxis={'categoryorder':'total descending'}
                         )
-                        # Forzar que el texto esté dentro de las barras
                         fig.update_traces(textposition='inside', textfont_color='white')
                         
                         st.plotly_chart(fig, use_container_width=True)
