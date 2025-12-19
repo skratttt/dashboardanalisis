@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.io as pio  # <--- NUEVO: Para configurar estilo global de graficos
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 import spacy
@@ -16,7 +17,15 @@ import tempfile
 import os
 
 # ==========================================
-# 1. CONFIGURACIÓN ESTILO
+# 0. CONFIGURACIÓN GLOBAL DE ESTILOS DE GRÁFICOS
+# ==========================================
+# Esto asegura que al descargar, el fondo sea BLANCO y no transparente
+pio.templates.default = "plotly_white"
+plt.rcParams['figure.facecolor'] = 'white'
+plt.rcParams['axes.facecolor'] = 'white'
+
+# ==========================================
+# 1. CONFIGURACIÓN ESTILO STREAMLIT
 # ==========================================
 st.set_page_config(page_title="Analisis de texto", layout="wide")
 
@@ -25,6 +34,11 @@ st.markdown("""
     .block-container {padding-top: 2rem;}
     h1, h2, h3 {font-family: 'Sans-serif'; color: #202124;}
     
+    /* Forzar fondo blanco general por si falla el config.toml */
+    .stApp {
+        background-color: white;
+    }
+
     div.stButton > button[kind="primary"] {
         background-color: #1A73E8;
         color: white;
@@ -124,21 +138,19 @@ with st.sidebar:
             
             col_texto = st.selectbox("2. Columna de TEXTO", cols, index=idx_txt)
             
-            # --- LIMPIEZA AUTOMÁTICA (Corrección EE.UU y QUOT) ---
+            # --- LIMPIEZA AUTOMÁTICA ---
             if col_texto:
                 def limpiar_texto_duro(txt):
                     if not isinstance(txt, str): return str(txt)
                     t = txt.lower()
-                    # 1. Unificar variantes de EE.UU
+                    # Unificar EE.UU y borrar basura
                     t = t.replace("ee.uu.", "eeuu").replace("ee.uu", "eeuu")
                     t = t.replace("ee. uu.", "eeuu").replace("ee. uu", "eeuu")
-                    # 2. Borrar basura HTML
                     t = t.replace("&quot;", "").replace("quot", "")
                     return t
 
-                # Aplicamos limpieza inmediatamente
                 df[col_texto] = df[col_texto].apply(limpiar_texto_duro)
-            # -----------------------------------------------------
+            # ---------------------------
 
             st.info("Opcional: Agrupador (ej: Medio, Fecha)")
             col_cat = st.selectbox("3. Columna de AGRUPACIÓN", ["No aplicar"] + cols)
@@ -170,6 +182,7 @@ if archivo and col_texto:
             conteo = df[col_cat].value_counts().reset_index()
             conteo.columns = ['Categoria', 'Count']
             
+            # Plotly usa 'plotly_white' por defecto ahora
             fig = px.bar(conteo.head(20), x='Count', y='Categoria', orientation='h', 
                          title=f"Distribución por {col_cat}", text_auto=True)
             fig.update_layout(yaxis={'categoryorder':'total ascending'})
@@ -219,7 +232,8 @@ if archivo and col_texto:
             
             st.subheader(" Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
-            fig, ax = plt.subplots(figsize=(10, 4))
+            # Matplotlib asegurando fondo blanco
+            fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             ax.imshow(wc, interpolation='bilinear')
             ax.axis('off')
             st.pyplot(fig)
@@ -277,7 +291,7 @@ if archivo and col_texto:
                     st.plotly_chart(fig_tri, use_container_width=True)
                 except: st.warning("No hay suficientes datos para Trigramas")
 
-    # ---------------- TAB 4: CLUSTERIZACION (CORREGIDA) ----------------
+    # ---------------- TAB 4: CLUSTERIZACION ----------------
     with tabs[3]:
         st.subheader("Detección de Patrones (Topic Modeling)")
         
@@ -297,17 +311,17 @@ if archivo and col_texto:
                     docs = df[col_texto].tolist()
                     embeddings = embedding_model.encode(docs, show_progress_bar=False)
 
-                    # 2. Configurar Vectorizer con STOPWORDS (Corrección Stopwords)
+                    # 2. Configurar Vectorizer con STOPWORDS
                     vectorizer_model = CountVectorizer(stop_words=all_stopwords, min_df=2)
 
-                    # 3. Configurar BERTopic (Corrección Slider)
+                    # 3. Configurar BERTopic
                     min_size = max(5, int(len(docs) * 0.005))
                     
                     topic_model = BERTopic(
                         language="multilingual", 
                         min_topic_size=min_size,
-                        nr_topics=n_topics_aprox, # Valor directo del slider
-                        vectorizer_model=vectorizer_model, # Inyección de stopwords
+                        nr_topics=n_topics_aprox,
+                        vectorizer_model=vectorizer_model,
                         calculate_probabilities=True, 
                         verbose=True
                     )
@@ -315,7 +329,7 @@ if archivo and col_texto:
                     # 4. Entrenar Modelo
                     topics, probs = topic_model.fit_transform(docs, embeddings)
                     
-                    # 5. Reasignar Outliers (Corrección Outliers)
+                    # 5. Reasignar Outliers
                     if force_assign:
                         try:
                             new_topics = topic_model.reduce_outliers(docs, topics, strategy="embeddings", embeddings=embeddings)
@@ -364,7 +378,8 @@ if archivo and col_texto:
                             with cols_wc[i % 3]:
                                 name_clean = freq_clean[freq_clean['Topic']==topic_id]['Nombre_Tema'].values[0]
                                 st.markdown(f"**Grupo {topic_id}:** {name_clean}")
-                                fig_wc, ax_wc = plt.subplots(figsize=(4, 3))
+                                # Matplotlib asegurando fondo blanco
+                                fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
                                 ax_wc.imshow(wc_cluster, interpolation='bilinear')
                                 ax_wc.axis('off')
                                 st.pyplot(fig_wc)
