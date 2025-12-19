@@ -372,6 +372,25 @@ if archivo and col_texto:
                 except Exception as e:
                     st.error(f"Error en el clustering: {str(e)}")
                     st.info("Intenta reducir el número de temas o aumentar el tamaño de la muestra.")
+        # ... código anterior dentro de tabs[3] ...
+
+                    st.markdown("---")
+                    st.subheader("🌲 Jerarquía de Temas (Para decidir el número óptimo)")
+                    st.markdown("""
+                    **¿Cómo leer esto?**
+                    - Este árbol agrupa temas similares. 
+                    - Si cortas el árbol por la izquierda, tendrás menos temas (más generales).
+                    - Si lo cortas por la derecha, tendrás más temas (más específicos).
+                    - **Tip:** Busca la línea vertical donde se unen los grandes bloques para estimar el número ideal.
+                    """)
+                    
+                    try:
+                        # Hierarchical clustering plot
+                        fig_hierarchy = topic_model.visualize_hierarchy(top_n_topics=30)
+                        st.plotly_chart(fig_hierarchy, use_container_width=True)
+                    except:
+                        st.info("Se necesitan más temas para generar la jerarquía.")
+                        
     
     #5
     with tabs[4]:
