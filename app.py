@@ -268,51 +268,111 @@ if archivo and col_texto:
                 except: st.warning("No hay suficientes datos para Trigramas")
 
  #4
+    # 4. CLUSTERIZACION 
     with tabs[3]:
-        st.subheader("Deteccion de Patrones")
-        if st.button("Detectar Clusters y Outliers", type="primary"):
-            with st.spinner("Entrenando modelo de clustering..."):
-                topic_model = BERTopic(language="multilingual", min_topic_size=5)
-                topics, probs = topic_model.fit_transform(df[col_texto].tolist())
-                df['Cluster_ID'] = topics
-                
-                freq = topic_model.get_topic_info()
-                freq_clean = freq[freq['Topic'] != -1].head(10)
-                freq_clean['Nombre'] = freq_clean['Name'].apply(lambda x: " ".join(x.split("_")[1:4]))
-                
-                c1, c2 = st.columns([2, 1])
-                with c1:
-                    st.plotly_chart(px.bar(freq_clean, x='Nombre', y='Count', title="Grupos Principales", color='Count'), use_container_width=True)
-                with c2:
-                    st.info("Mapa de Similitud")
-                    st.plotly_chart(topic_model.visualize_topics(), use_container_width=True)
+        st.subheader("Detección de Temas (Topic Modeling)")
+        
+        # Opciones de configuración para el usuario
+        col_opts1, col_opts2 = st.columns(2)
+        with col_opts1:
+            n_topics_aprox = st.slider("Número esperado de temas (aprox)", 2, 50, 10, help="Esto ajusta la sensibilidad del modelo.")
+        with col_opts2:
+            force_assign = st.checkbox("Forzar asignación de todos los registros", value=True, help="Si se activa, el sistema intentará eliminar todos los 'Outliers' (-1) reasignándolos al tema más cercano.")
 
-                st.markdown("---")
-                
-                st.subheader("Nubes de Palabras por Grupo")
-                cols = st.columns(3)
-                top_clusters = freq_clean['Topic'].tolist()[:6]
-                
-                for idx, topic_id in enumerate(top_clusters):
-                    text_cluster = " ".join(df[df['Cluster_ID'] == topic_id][col_texto].tolist())
-                    if len(text_cluster) > 0:
-                        wc_cluster = WordCloud(width=400, height=300, background_color='white', stopwords=all_stopwords, colormap='Dark2').generate(text_cluster)
-                        with cols[idx % 3]:
-                            st.markdown(f"**Grupo {topic_id}**")
+        if st.button("Ejecutar Clustering", type="primary"):
+            with st.spinner("Generando Embeddings y Clusters..."):
+                try:
+                    # 1. Cargar modelo de embeddings 
+                    embedding_model = cargar_modelo_embeddings()
+                    docs = df[col_texto].tolist()
+                    
+                    # Pre-calcular embeddings para mayor control
+                    embeddings = embedding_model.encode(docs, show_progress_bar=True)
+
+                    #Configurar BERTopic
+                    # Ajustamos min_topic_size dinámicamente según el tamaño del dataset
+                    min_size = max(5, int(len(docs) * 0.005)) 
+                    
+                    topic_model = BERTopic(
+                        language="multilingual", 
+                        min_topic_size=min_size,
+                        nr_topics=n_topics_aprox if n_topics_aprox > 5 else "auto", # Auto reducción si el usuario pide pocos
+                        calculate_probabilities=True, # Necesario para reasignar outliers
+                        verbose=True
+                    )
+                    
+                    # 3. Entrenar
+                    topics, probs = topic_model.fit_transform(docs, embeddings)
+                    
+                    # 4. REASIGNACIÓN DE OUTLIERS (La solución a tu problema)
+                    if force_assign:
+                        # Estrategia: "c-tf-idf" o "embeddings". 'embeddings' suele ser más preciso para similitud semántica.
+                        new_topics = topic_model.reduce_outliers(docs, topics, strategy="embeddings", embeddings=embeddings)
+                        topic_model.update_topics(docs, topics=new_topics)
+                        topics = new_topics
+                        st.success("✅ Outliers reasignados a sus temas más cercanos.")
+                    
+                    df['Cluster_ID'] = topics
+                    
+                    # 5. Mostrar Resultados
+                    freq = topic_model.get_topic_info()
+                    # Filtramos el tema -1 solo si no forzamos asignación o si quedó alguno residual
+                    freq_clean = freq[freq['Topic'] != -1].head(15)
+                    
+                    # Limpieza de nombres para el gráfico
+                    freq_clean['Nombre_Tema'] = freq_clean['Name'].apply(lambda x: " ".join(x.split("_")[1:4]))
+                    
+                    c1, c2 = st.columns([2, 1])
+                    with c1:
+                        st.markdown("#### Distribución de Temas")
+                        fig_bar = px.bar(freq_clean, x='Count', y='Nombre_Tema', orientation='h', 
+                                         text_auto=True, title="Temas Principales Detectados")
+                        fig_bar.update_layout(yaxis={'categoryorder':'total ascending'})
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                        
+                    with c2:
+                        st.markdown("#### Mapa de Distancia")
+                        try:
+                            st.plotly_chart(topic_model.visualize_topics(), use_container_width=True)
+                        except:
+                            st.warning("No se generaron suficientes temas para el mapa.")
+
+                    st.markdown("---")
+                    
+                    st.subheader("Palabras Clave por Grupo")
+                    top_clusters = freq_clean['Topic'].tolist()[:6] # Top 6 temas
+                    
+                    cols_wc = st.columns(3)
+                    for i, topic_id in enumerate(top_clusters):
+                        # Obtener palabras clave del modelo directamente (más preciso que wordcloud crudo)
+                        keywords_dict = {word: score for word, score in topic_model.get_topic(topic_id)}
+                        
+                        wc_cluster = WordCloud(width=400, height=250, background_color='white', 
+                                             colormap='viridis').generate_from_frequencies(keywords_dict)
+                        
+                        with cols_wc[i % 3]:
+                            st.markdown(f"**Grupo {topic_id}: {freq_clean[freq_clean['Topic']==topic_id]['Nombre_Tema'].values[0]}**")
                             fig_wc, ax_wc = plt.subplots(figsize=(4, 3))
                             ax_wc.imshow(wc_cluster, interpolation='bilinear')
                             ax_wc.axis('off')
                             st.pyplot(fig_wc)
                             plt.close()
 
-                st.markdown("---")
-                st.subheader("Registros Anomalos (Outliers)")
-                outliers = df[df['Cluster_ID'] == -1]
-                st.metric("Cantidad de Outliers", len(outliers))
-                with st.expander("Ver datos anomalos"):
-                    cols_to_show = [col_texto] + ([col_cat] if col_cat != "No aplicar" else [])
-                    st.dataframe(outliers[cols_to_show])
+                    # 7. Tabla de Outliers 
+                    outliers = df[df['Cluster_ID'] == -1]
+                    if len(outliers) > 0:
+                        st.markdown("---")
+                        st.warning(f"Aún quedan {len(outliers)} registros sin clasificar (ruido extremo).")
+                        with st.expander("Ver registros no clasificados"):
+                            st.dataframe(outliers[[col_texto]])
+                    else:
+                        st.balloons()
+                        st.success("¡Todos los documentos fueron clasificados exitosamente!")
 
+                except Exception as e:
+                    st.error(f"Error en el clustering: {str(e)}")
+                    st.info("Intenta reducir el número de temas o aumentar el tamaño de la muestra.")
+    
     #5
     with tabs[4]:
         st.subheader("Motor de Busqueda Semantica")
