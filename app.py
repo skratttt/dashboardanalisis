@@ -215,15 +215,47 @@ if archivo and col_texto:
                 with c1: 
                     st.plotly_chart(px.pie(df, names='Sentimiento', title="Distribucion Global", 
                                     color='Sentimiento', color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}), use_container_width=True)
-                with c2:
+              
+               with c2:
                     if col_cat != "No aplicar":
+                        # 1. Filtrar categorías con pocos datos (ruido)
                         val_counts = df[col_cat].value_counts()
-                        top_cats = val_counts[val_counts > 1].index
+                        top_cats = val_counts[val_counts > 5].index # Solo categorías con más de 5 datos
                         df_f = df[df[col_cat].isin(top_cats)]
-                        st.plotly_chart(px.imshow(pd.crosstab(df_f[col_cat], df_f['Sentimiento'], normalize='index')*100, 
-                                        text_auto='.0f', aspect="auto", color_continuous_scale="RdBu", origin='lower',
-                                        labels=dict(x="Sentimiento", y=col_cat, color="%")), use_container_width=True)
-
+                        
+                        # 2. Calcular porcentajes manualmente para el gráfico
+                        # Agrupamos por Medio y Sentimiento
+                        df_grouped = df_f.groupby([col_cat, 'Sentimiento']).size().reset_index(name='Conteo')
+                        # Calculamos el % del total por cada Medio
+                        df_grouped['Porcentaje'] = df_grouped.groupby(col_cat)['Conteo'].transform(lambda x: 100 * x / x.sum())
+                        
+                        # 3. Gráfico de Barras Apiladas
+                        fig = px.bar(
+                            df_grouped, 
+                            x="Porcentaje", 
+                            y=col_cat, 
+                            color="Sentimiento", 
+                            orientation='h',
+                            text_auto='.0f', # Muestra el número sin decimales
+                            title=f"Comparativa de Sentimiento por {col_cat}",
+                            # Colores semánticos: Rojo para negativo, Verde para positivo
+                            color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}
+                        )
+                        
+                        # Limpieza visual
+                        fig.update_layout(
+                            xaxis_title="% del Total",
+                            yaxis_title="",
+                            legend_title=dict(text=""),
+                            # Ordenar barras por cantidad de negativos (opcional, para ranking)
+                            yaxis={'categoryorder':'total descending'}
+                        )
+                        # Forzar que el texto esté dentro de las barras
+                        fig.update_traces(textposition='inside', textfont_color='white')
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("Selecciona una columna de agrupación (ej. Medio) en la barra lateral para ver este gráfico.")
     # ---------------- TAB 3: LENGUAJE PROFUNDO ----------------
     with tabs[2]:
         if st.button("Ejecutar Analisis Completo de Lenguaje"):
