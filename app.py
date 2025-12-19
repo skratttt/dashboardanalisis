@@ -179,19 +179,30 @@ if archivo and col_texto:
         
         if col_cat != "No aplicar":
             c2.metric(f"Total de {col_cat} únicos", df[col_cat].nunique())
+            
+            # Preparamos los datos
             conteo = df[col_cat].value_counts().reset_index()
             conteo.columns = ['Categoria', 'Count']
             
-            # Plotly usa 'plotly_white' por defecto ahora
+            # --- GRÁFICO CORREGIDO ---
             fig = px.bar(conteo.head(20), x='Count', y='Categoria', orientation='h', 
                          title=f"Distribución por {col_cat}", text_auto=True)
-            fig.update_layout(yaxis={'categoryorder':'total ascending'})
+            
+            fig.update_layout(
+                # 1. Ordenamos de mayor a menor (El más grande arriba)
+                yaxis={'categoryorder':'total ascending'},
+                # 2. ACTIVAMOS AUTOMARGIN (Esto arregla que no se lean los nombres largos)
+                yaxis_tickmode='linear',
+                margin=dict(l=10, r=10, t=50, b=10) # Damos aire, pero dejamos que automargin trabaje
+            )
+            # Forzamos explícitamente el ajuste de etiquetas
+            fig.update_yaxes(automargin=True)
+            
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Selecciona una columna de agrupación para ver estadísticas.")
 
     # ---------------- TAB 2: SENTIMIENTO ----------------
-   # ---------------- TAB 2: SENTIMIENTO (CON MEMORIA / PERSISTENCIA) ----------------
     with tabs[1]:
         st.subheader("Clasificacion de Tono")
         
