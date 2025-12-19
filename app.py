@@ -191,112 +191,125 @@ if archivo and col_texto:
             st.info("Selecciona una columna de agrupación para ver estadísticas.")
 
     # ---------------- TAB 2: SENTIMIENTO ----------------
-   # ---------------- TAB 2: SENTIMIENTO (COMPLETO) ----------------
+   # ---------------- TAB 2: SENTIMIENTO (CON MEMORIA / PERSISTENCIA) ----------------
     with tabs[1]:
         st.subheader("Clasificacion de Tono")
         
-        # Botón para activar el proceso (para no gastar recursos si no se usa)
-        if st.button("Ejecutar Modelo de Sentimiento", type="primary"):
-            with st.spinner("Procesando..."):
-                # 1. Carga de Modelo y Predicción
-                tok, mod = cargar_modelo_sentimiento()
-                
-                def predict(txts):
-                    # Tokenizamos en lotes
-                    inp = tok(txts, return_tensors="pt", padding=True, truncation=True, max_length=128).to("cpu")
-                    with torch.no_grad(): out = mod(**inp)
-                    # Convertimos logits a probabilidades y elegimos etiqueta
-                    return ["Positivo" if p[1]>p[0] else "Negativo" for p in torch.softmax(out.logits, dim=1)]
-                
-                res = []
-                bs = 32 # Tamaño del lote (Batch size)
-                prog = st.progress(0)
-                txts = df[col_texto].tolist()
-                
-                # Loop de predicción con barra de progreso
-                for i in range(0, len(txts), bs):
-                    res.extend(predict(txts[i:i+bs]))
-                    prog.progress(min((i+bs)/len(txts), 1.0))
-                
-                df['Sentimiento'] = res
-                
-                # 2. Visualización
-                c1, c2 = st.columns([1, 2])
-                
-                # --- COLUMNA IZQUIERDA: TORTA GLOBAL ---
-                with c1: 
-                    st.markdown("##### Distribución Global")
-                    st.plotly_chart(px.pie(df, names='Sentimiento', 
-                                    color='Sentimiento', 
-                                    color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}), 
-                                    use_container_width=True)
-                
-                # --- COLUMNA DERECHA: BARRAS COMPARATIVAS ---
-                with c2:
-                    if col_cat != "No aplicar":
-                        st.markdown(f"##### Comparativa por {col_cat}")
-                        
-                        # A. SELECTOR DE FILTRO (TOP X)
-                        c_fil, _ = st.columns([1, 1])
-                        with c_fil:
-                            opcion_top = st.selectbox(
-                                "Filtrar por volumen:", 
-                                ["Top 3", "Top 5", "Top 10", "Top 20", "Todos"],
-                                index=2 # Por defecto Top 10
-                            )
-                        
-                        # B. LÓGICA DE FILTRADO
-                        conteo_total = df[col_cat].value_counts()
-                        
-                        if opcion_top != "Todos":
-                            n_top = int(opcion_top.split(" ")[1])
-                            cats_to_keep = conteo_total.head(n_top).index
-                            df_f = df[df[col_cat].isin(cats_to_keep)]
-                        else:
-                            df_f = df.copy()
+        # 1. Chequeamos si ya existen resultados en memoria para este archivo
+        #    Usamos una clave única combinada con el nombre del archivo para resetear si cambias de CSV
+        if 'sentimiento_data' not in st.session_state:
+            st.session_state.sentimiento_data = None
+        
+        # Botón para activar el proceso (Solo se muestra si NO hay datos en memoria)
+        if st.session_state.sentimiento_data is None:
+            if st.button("Ejecutar Modelo de Sentimiento", type="primary"):
+                with st.spinner("Procesando..."):
+                    # --- CÁLCULO (IGUAL QUE ANTES) ---
+                    tok, mod = cargar_modelo_sentimiento()
+                    
+                    def predict(txts):
+                        inp = tok(txts, return_tensors="pt", padding=True, truncation=True, max_length=128).to("cpu")
+                        with torch.no_grad(): out = mod(**inp)
+                        return ["Positivo" if p[1]>p[0] else "Negativo" for p in torch.softmax(out.logits, dim=1)]
+                    
+                    res = []
+                    bs = 32
+                    prog = st.progress(0)
+                    txts = df[col_texto].tolist()
+                    
+                    for i in range(0, len(txts), bs):
+                        res.extend(predict(txts[i:i+bs]))
+                        prog.progress(min((i+bs)/len(txts), 1.0))
+                    
+                    # --- AQUÍ ESTÁ EL TRUCO: GUARDAMOS EN MEMORIA ---
+                    st.session_state.sentimiento_data = res
+                    st.rerun() # Recargamos forzosamente para que desaparezca el botón y aparezcan los gráficos
 
-                        # C. PREPARACIÓN DE DATOS (Agrupar y calcular %)
-                        df_grouped = df_f.groupby([col_cat, 'Sentimiento']).size().reset_index(name='Conteo')
-                        # Calculamos el % relativo dentro de cada categoría
-                        df_grouped['Porcentaje'] = df_grouped.groupby(col_cat)['Conteo'].transform(lambda x: 100 * x / x.sum())
-                        
-                        # Altura dinámica: Si hay muchos medios, agrandamos el gráfico
-                        n_categorias = df_grouped[col_cat].nunique()
-                        alto_grafico = max(350, n_categorias * 40) 
+        # 2. Si ya hay datos en memoria, mostramos los gráficos (PERSISTENCIA)
+        if st.session_state.sentimiento_data is not None:
+            # Recuperamos los datos de la memoria
+            df['Sentimiento'] = st.session_state.sentimiento_data
+            
+            # Botón opcional para reiniciar si quieren correrlo de nuevo
+            if st.button("🔄 Reiniciar Análisis", type="secondary"):
+                st.session_state.sentimiento_data = None
+                st.rerun()
 
-                        # D. GRÁFICO DE BARRAS APILADAS
-                        fig = px.bar(
-                            df_grouped, 
-                            x="Porcentaje", 
-                            y=col_cat, 
-                            color="Sentimiento", 
-                            orientation='h',
-                            text_auto='.0f', # Muestra el % redondeado en la barra
-                            # Tooltip con datos exactos
-                            hover_data={'Porcentaje':':.1f', 'Conteo':True},
-                            color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'},
-                            height=alto_grafico 
+            # --- VISUALIZACIÓN (CÓDIGO ANTERIOR) ---
+            c1, c2 = st.columns([1, 2])
+            
+            # --- COLUMNA IZQUIERDA: TORTA GLOBAL ---
+            with c1: 
+                st.markdown("##### Distribución Global")
+                st.plotly_chart(px.pie(df, names='Sentimiento', 
+                                color='Sentimiento', 
+                                color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}), 
+                                use_container_width=True)
+            
+            # --- COLUMNA DERECHA: BARRAS COMPARATIVAS ---
+            with c2:
+                if col_cat != "No aplicar":
+                    st.markdown(f"##### Comparativa por {col_cat}")
+                    
+                    # A. SELECTOR DE FILTRO (TOP X)
+                    # Ahora al cambiar esto, Streamlit recarga, entra al 'if session_state is not None' y pinta todo bien
+                    c_fil, _ = st.columns([1, 1])
+                    with c_fil:
+                        opcion_top = st.selectbox(
+                            "Filtrar por volumen:", 
+                            ["Top 3", "Top 5", "Top 10", "Top 20", "Todos"],
+                            index=2 
                         )
-                        
-                        fig.update_layout(
-                            xaxis_title="% del Total",
-                            yaxis_title="",
-                            legend_title=dict(text=""),
-                            yaxis={'categoryorder':'total ascending'} # Ordenar por volumen total
-                        )
-                        fig.update_traces(textposition='inside', textfont_color='white')
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # E. TABLA DE DATOS
-                        with st.expander("📊 Ver Tabla de Datos Exactos", expanded=True):
-                            tabla = pd.crosstab(df_f[col_cat], df_f['Sentimiento'])
-                            tabla['Total'] = tabla.sum(axis=1)
-                            tabla = tabla.sort_values('Total', ascending=False)
-                            st.dataframe(tabla, use_container_width=True)
-
+                    
+                    # B. LÓGICA DE FILTRADO
+                    conteo_total = df[col_cat].value_counts()
+                    
+                    if opcion_top != "Todos":
+                        n_top = int(opcion_top.split(" ")[1])
+                        cats_to_keep = conteo_total.head(n_top).index
+                        df_f = df[df[col_cat].isin(cats_to_keep)]
                     else:
-                        st.info(f"Selecciona una columna de agrupación en la barra lateral para ver el detalle por categoría.")
+                        df_f = df.copy()
+
+                    # C. PREPARACIÓN DE DATOS 
+                    df_grouped = df_f.groupby([col_cat, 'Sentimiento']).size().reset_index(name='Conteo')
+                    df_grouped['Porcentaje'] = df_grouped.groupby(col_cat)['Conteo'].transform(lambda x: 100 * x / x.sum())
+                    
+                    n_categorias = df_grouped[col_cat].nunique()
+                    alto_grafico = max(350, n_categorias * 40) 
+
+                    # D. GRÁFICO 
+                    fig = px.bar(
+                        df_grouped, 
+                        x="Porcentaje", 
+                        y=col_cat, 
+                        color="Sentimiento", 
+                        orientation='h',
+                        text_auto='.0f', 
+                        hover_data={'Porcentaje':':.1f', 'Conteo':True},
+                        color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'},
+                        height=alto_grafico 
+                    )
+                    
+                    fig.update_layout(
+                        xaxis_title="% del Total",
+                        yaxis_title="",
+                        legend_title=dict(text=""),
+                        yaxis={'categoryorder':'total ascending'} 
+                    )
+                    fig.update_traces(textposition='inside', textfont_color='white')
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # E. TABLA 
+                    with st.expander("📊 Ver Tabla de Datos Exactos", expanded=True):
+                        tabla = pd.crosstab(df_f[col_cat], df_f['Sentimiento'])
+                        tabla['Total'] = tabla.sum(axis=1)
+                        tabla = tabla.sort_values('Total', ascending=False)
+                        st.dataframe(tabla, use_container_width=True)
+
+                else:
+                    st.info(f"Selecciona una columna de agrupación en la barra lateral para ver el detalle por categoría.")
     # ---------------- TAB 3: LENGUAJE PROFUNDO ----------------
     with tabs[2]:
         if st.button("Ejecutar Analisis Completo de Lenguaje"):
