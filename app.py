@@ -274,7 +274,6 @@ if archivo and col_texto:
         # --- Controles ---
         c_controls_1, c_controls_2 = st.columns(2)
         with c_controls_1:
-            # FIX: El slider ahora controla directamente el nr_topics sin condiciones extrañas
             n_topics_aprox = st.slider("Número de Temas Deseados", 2, 50, 5, 
                                      help="El modelo fusionará temas hasta llegar a este número.")
         with c_controls_2:
@@ -284,50 +283,50 @@ if archivo and col_texto:
         if st.button("Ejecutar Clustering", type="primary"):
             with st.spinner("Generando Embeddings y Clusters..."):
                 try:
-                    # 1. Preparar datos y Embeddings
-                    # Usamos los embeddings pre-calculados para mejorar la precisión de la reasignación
+                    # 1. Preparar Embeddings
                     embedding_model = cargar_modelo_embeddings()
                     docs = df[col_texto].tolist()
                     embeddings = embedding_model.encode(docs, show_progress_bar=False)
 
-                    # 2. Configurar BERTopic
-                    # Calculamos un tamaño mínimo dinámico para evitar micro-clusters en datasets grandes
+                    # 2. Configurar Vectorizer con STOPWORDS (¡La corrección clave!)
+                    # Esto obliga a BERTopic a ignorar las palabras que definiste en el sidebar
+                    vectorizer_model = CountVectorizer(stop_words=all_stopwords, min_df=2)
+
+                    # 3. Configurar BERTopic
                     min_size = max(5, int(len(docs) * 0.005))
                     
                     topic_model = BERTopic(
                         language="multilingual", 
                         min_topic_size=min_size,
-                        nr_topics=n_topics_aprox, # <--- AQUI ESTA EL ARREGLO (Valor directo)
+                        nr_topics=n_topics_aprox, 
+                        vectorizer_model=vectorizer_model, # <--- Aquí inyectamos tus stopwords
                         calculate_probabilities=True, 
                         verbose=True
                     )
                     
-                    # 3. Entrenar Modelo
+                    # 4. Entrenar Modelo
                     topics, probs = topic_model.fit_transform(docs, embeddings)
                     
-                    # 4. Reasignar Outliers (Estrategia de Embeddings)
+                    # 5. Reasignar Outliers
                     if force_assign:
-                        # Reduce outliers usando la similitud de cosenos con los centroides de los temas
                         try:
                             new_topics = topic_model.reduce_outliers(docs, topics, strategy="embeddings", embeddings=embeddings)
-                            topic_model.update_topics(docs, topics=new_topics)
+                            topic_model.update_topics(docs, topics=new_topics, vectorizer_model=vectorizer_model) # Actualizamos representación
                             topics = new_topics
                             st.success("✅ Outliers reasignados exitosamente.")
                         except Exception as e:
-                            st.warning(f"No se pudieron reasignar outliers (quizás no quedaron outliers): {e}")
+                            pass # Si falla o no hay outliers, seguimos
                     
-                    # Guardamos en el DF para uso posterior si se quiere
                     df['Cluster_ID'] = topics
                     
                     # ---------------------------------------------------------
                     # VISUALIZACION
                     # ---------------------------------------------------------
                     
-                    # Obtener info de temas (excluyendo el -1 si es que quedó alguno)
                     freq = topic_model.get_topic_info()
                     freq_clean = freq[freq['Topic'] != -1].head(20)
                     
-                    # Limpiamos el nombre para que no salga "0_palabra_palabra"
+                    # Limpieza de nombres
                     freq_clean['Nombre_Tema'] = freq_clean['Name'].apply(lambda x: " ".join(x.split("_")[1:4]))
                     
                     col_res1, col_res2 = st.columns([2, 1])
@@ -342,21 +341,20 @@ if archivo and col_texto:
                     with col_res2:
                         st.markdown("#### Mapa Intertópico")
                         try:
-                            # Visualización oficial de BERTopic
                             st.plotly_chart(topic_model.visualize_topics(), use_container_width=True)
                         except:
-                            st.info("Se necesitan más temas para generar el mapa de distancia.")
+                            st.info("Se necesitan más temas para generar el mapa.")
 
                     st.markdown("---")
                     
-                    # Nubes de Palabras (Generadas desde los pesos del modelo, no del texto crudo)
+                    # Nubes de Palabras (Ahora sí limpias)
                     st.subheader("Palabras Clave por Grupo")
                     
-                    top_clusters = freq_clean['Topic'].tolist()[:6] # Solo los top 6 para no saturar
+                    top_clusters = freq_clean['Topic'].tolist()[:6] 
                     cols_wc = st.columns(3)
                     
                     for i, topic_id in enumerate(top_clusters):
-                        # Obtenemos las palabras y sus scores c-TF-IDF directamente del modelo
+                        # Al haber inyectado el vectorizer, get_topic ya viene limpio de stopwords
                         topic_words = topic_model.get_topic(topic_id)
                         if topic_words:
                             keywords_dict = {word: score for word, score in topic_words}
@@ -373,18 +371,15 @@ if archivo and col_texto:
                                 st.pyplot(fig_wc)
                                 plt.close()
 
-                    # Tabla de Outliers (Solo si quedan)
+                    # Tabla de Outliers
                     outliers = df[df['Cluster_ID'] == -1]
                     if len(outliers) > 0:
                         st.markdown("---")
-                        st.error(f"Quedaron {len(outliers)} documentos sin clasificar.")
-                        with st.expander("Ver Outliers"):
+                        with st.expander(f"Ver {len(outliers)} documentos sin clasificar"):
                             st.dataframe(outliers[[col_texto]])
 
                 except Exception as e:
-                    st.error(f"Error durante el clustering: {e}")
-                    st.write("Intenta aumentar el número de registros o cambiar los parámetros.")
-       
+                    st.error(f"Error: {e}")
     
     #5
     with tabs[4]:
