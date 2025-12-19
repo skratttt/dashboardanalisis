@@ -16,7 +16,7 @@ import tempfile
 import os
 
 # ==========================================
-# 1. CONFIGURACIÓN ESTILO (GEMINI UI)
+# 1. CONFIGURACIÓN ESTILO
 # ==========================================
 st.set_page_config(page_title="Analisis de texto", layout="wide")
 
@@ -25,7 +25,6 @@ st.markdown("""
     .block-container {padding-top: 2rem;}
     h1, h2, h3 {font-family: 'Sans-serif'; color: #202124;}
     
-    /* BOTONES PRIMARIOS */
     div.stButton > button[kind="primary"] {
         background-color: #1A73E8;
         color: white;
@@ -42,7 +41,6 @@ st.markdown("""
         transform: translateY(-1px);
     }
 
-    /* BOTONES SECUNDARIOS */
     div.stButton > button[kind="secondary"] {
         background-color: white;
         color: #1A73E8;
@@ -50,20 +48,14 @@ st.markdown("""
         border-radius: 24px;
         font-weight: 600;
     }
-    div.stButton > button[kind="secondary"]:hover {
-        background-color: #F8F9FA;
-        border-color: #1A73E8;
-        color: #174EA6;
-    }
 
-    /* PESTAÑAS (Corrección de contraste) */
     .stTabs [data-baseweb="tab-list"] {gap: 8px;}
     .stTabs [data-baseweb="tab"] {
         height: 45px;
         background-color: #ffffff;
         border-radius: 20px;
         padding: 0px 20px;
-        color: #5f6368; /* Color de texto más oscuro para que se lea bien */
+        color: #5f6368;
         border: 1px solid #f0f2f6;
     }
     .stTabs [aria-selected="true"] {
@@ -77,8 +69,10 @@ st.markdown("""
 
 st.title("Analisis de texto")
 st.markdown("Suite de analisis de Sentimiento, Entidades, N-Gramas, Temas y Redes.")
-#cache
 
+# ==========================================
+# 2. FUNCIONES CACHEADAS
+# ==========================================
 @st.cache_resource
 def cargar_spacy():
     try: return spacy.load("es_core_news_sm")
@@ -93,11 +87,9 @@ def cargar_modelo_sentimiento():
 def cargar_modelo_embeddings():
     return SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
 
-# Stopwords
 def get_stopwords(custom_list):
     base = list(cargar_spacy().Defaults.stop_words) if cargar_spacy() else []
     return base + custom_list
-
 
 def get_top_ngrams(corpus, n=2, top_k=10, stopwords=[]):
     vec = CountVectorizer(ngram_range=(n, n), stop_words=stopwords).fit(corpus)
@@ -107,7 +99,9 @@ def get_top_ngrams(corpus, n=2, top_k=10, stopwords=[]):
     words_freq = sorted(words_freq, key=lambda x: x[1], reverse=True)
     return pd.DataFrame(words_freq[:top_k], columns=['Frase', 'Frecuencia'])
 
-#sidebar
+# ==========================================
+# 3. SIDEBAR Y CARGA DE DATOS
+# ==========================================
 with st.sidebar:
     st.header("Configuracion del Dataset")
     archivo = st.file_uploader("1. Subir Archivo (CSV)", type=["csv"])
@@ -127,8 +121,25 @@ with st.sidebar:
                 if possible in cols:
                     idx_txt = cols.index(possible)
                     break
+            
             col_texto = st.selectbox("2. Columna de TEXTO", cols, index=idx_txt)
             
+            # --- LIMPIEZA AUTOMÁTICA (Corrección EE.UU y QUOT) ---
+            if col_texto:
+                def limpiar_texto_duro(txt):
+                    if not isinstance(txt, str): return str(txt)
+                    t = txt.lower()
+                    # 1. Unificar variantes de EE.UU
+                    t = t.replace("ee.uu.", "eeuu").replace("ee.uu", "eeuu")
+                    t = t.replace("ee. uu.", "eeuu").replace("ee. uu", "eeuu")
+                    # 2. Borrar basura HTML
+                    t = t.replace("&quot;", "").replace("quot", "")
+                    return t
+
+                # Aplicamos limpieza inmediatamente
+                df[col_texto] = df[col_texto].apply(limpiar_texto_duro)
+            # -----------------------------------------------------
+
             st.info("Opcional: Agrupador (ej: Medio, Fecha)")
             col_cat = st.selectbox("3. Columna de AGRUPACIÓN", ["No aplicar"] + cols)
 
@@ -138,7 +149,10 @@ with st.sidebar:
             
         except Exception as e:
             st.error(f"Error al leer archivo: {e}")
-#main 
+
+# ==========================================
+# 4. APLICACIÓN PRINCIPAL
+# ==========================================
 if archivo and col_texto:
     df = df.dropna(subset=[col_texto])
     df[col_texto] = df[col_texto].astype(str)
@@ -146,7 +160,7 @@ if archivo and col_texto:
 
     tabs = st.tabs(["Resumen Global", "Analisis de Sentimiento", "Lenguaje Profundo", "Clusterizacion (Temas)", "Busqueda", "Redes"])
 
-#1
+    # ---------------- TAB 1: RESUMEN ----------------
     with tabs[0]:
         c1, c2 = st.columns(2)
         c1.metric("Total de Documentos", len(df))
@@ -163,7 +177,7 @@ if archivo and col_texto:
         else:
             st.info("Selecciona una columna de agrupación para ver estadísticas.")
 
-    #2
+    # ---------------- TAB 2: SENTIMIENTO ----------------
     with tabs[1]:
         st.subheader("Clasificacion de Tono")
         if st.button("Ejecutar Modelo de Sentimiento", type="primary"):
@@ -196,13 +210,13 @@ if archivo and col_texto:
                         st.plotly_chart(px.imshow(pd.crosstab(df_f[col_cat], df_f['Sentimiento'], normalize='index')*100, 
                                         text_auto='.0f', aspect="auto", color_continuous_scale="RdBu", origin='lower',
                                         labels=dict(x="Sentimiento", y=col_cat, color="%")), use_container_width=True)
-#3
+
+    # ---------------- TAB 3: LENGUAJE PROFUNDO ----------------
     with tabs[2]:
         if st.button("Ejecutar Analisis Completo de Lenguaje"):
             nlp = cargar_spacy()
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            # 1. NUBE DE PALABRAS
             st.subheader(" Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4))
@@ -212,8 +226,6 @@ if archivo and col_texto:
             plt.close()
 
             st.markdown("---")
-
-            
             st.subheader("Deteccion de Entidades (NER)")
             doc = nlp(full_text)
             
@@ -231,30 +243,28 @@ if archivo and col_texto:
                 return None
 
             col_a, col_b = st.columns(2)
-            
             with col_a: 
-                fig = plot_entity(per, "Top Personas", "#4285F4") # Azul
+                fig = plot_entity(per, "Top Personas", "#4285F4")
                 if fig: st.plotly_chart(fig, use_container_width=True)
                 else: st.info("Sin Personas")
 
             with col_b: 
-                fig = plot_entity(org, "Top Organizaciones", "#EA4335") # Rojo
+                fig = plot_entity(org, "Top Organizaciones", "#EA4335")
                 if fig: st.plotly_chart(fig, use_container_width=True)
                 else: st.info("Sin Organizaciones")
 
-            fig_loc = plot_entity(loc, "Top Lugares", "#34A853") # Verde
+            fig_loc = plot_entity(loc, "Top Lugares", "#34A853")
             if fig_loc: st.plotly_chart(fig_loc, use_container_width=True)
             else: st.info("Sin Lugares")
 
             st.markdown("---")
-
             st.subheader("Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             
             with c_bi:
                 try:
                     df_bi = get_top_ngrams(df[col_texto], n=2, top_k=10, stopwords=all_stopwords)
-                    fig_bi = px.bar(df_bi, x='Frecuencia', y='Frase', orientation='h', title="Top Bigramas (2 palabras)", color='Frecuencia')
+                    fig_bi = px.bar(df_bi, x='Frecuencia', y='Frase', orientation='h', title="Top Bigramas", color='Frecuencia')
                     fig_bi.update_layout(yaxis={'categoryorder':'total ascending'})
                     st.plotly_chart(fig_bi, use_container_width=True)
                 except: st.warning("No hay suficientes datos para Bigramas")
@@ -262,16 +272,15 @@ if archivo and col_texto:
             with c_tri:
                 try:
                     df_tri = get_top_ngrams(df[col_texto], n=3, top_k=10, stopwords=all_stopwords)
-                    fig_tri = px.bar(df_tri, x='Frecuencia', y='Frase', orientation='h', title="Top Trigramas (3 palabras)", color='Frecuencia')
+                    fig_tri = px.bar(df_tri, x='Frecuencia', y='Frase', orientation='h', title="Top Trigramas", color='Frecuencia')
                     fig_tri.update_layout(yaxis={'categoryorder':'total ascending'})
                     st.plotly_chart(fig_tri, use_container_width=True)
                 except: st.warning("No hay suficientes datos para Trigramas")
 
- #4
+    # ---------------- TAB 4: CLUSTERIZACION (CORREGIDA) ----------------
     with tabs[3]:
         st.subheader("Detección de Patrones (Topic Modeling)")
         
-        # --- Controles ---
         c_controls_1, c_controls_2 = st.columns(2)
         with c_controls_1:
             n_topics_aprox = st.slider("Número de Temas Deseados", 2, 50, 5, 
@@ -288,18 +297,17 @@ if archivo and col_texto:
                     docs = df[col_texto].tolist()
                     embeddings = embedding_model.encode(docs, show_progress_bar=False)
 
-                    # 2. Configurar Vectorizer con STOPWORDS (¡La corrección clave!)
-                    # Esto obliga a BERTopic a ignorar las palabras que definiste en el sidebar
+                    # 2. Configurar Vectorizer con STOPWORDS (Corrección Stopwords)
                     vectorizer_model = CountVectorizer(stop_words=all_stopwords, min_df=2)
 
-                    # 3. Configurar BERTopic
+                    # 3. Configurar BERTopic (Corrección Slider)
                     min_size = max(5, int(len(docs) * 0.005))
                     
                     topic_model = BERTopic(
                         language="multilingual", 
                         min_topic_size=min_size,
-                        nr_topics=n_topics_aprox, 
-                        vectorizer_model=vectorizer_model, # <--- Aquí inyectamos tus stopwords
+                        nr_topics=n_topics_aprox, # Valor directo del slider
+                        vectorizer_model=vectorizer_model, # Inyección de stopwords
                         calculate_probabilities=True, 
                         verbose=True
                     )
@@ -307,26 +315,21 @@ if archivo and col_texto:
                     # 4. Entrenar Modelo
                     topics, probs = topic_model.fit_transform(docs, embeddings)
                     
-                    # 5. Reasignar Outliers
+                    # 5. Reasignar Outliers (Corrección Outliers)
                     if force_assign:
                         try:
                             new_topics = topic_model.reduce_outliers(docs, topics, strategy="embeddings", embeddings=embeddings)
-                            topic_model.update_topics(docs, topics=new_topics, vectorizer_model=vectorizer_model) # Actualizamos representación
+                            topic_model.update_topics(docs, topics=new_topics, vectorizer_model=vectorizer_model)
                             topics = new_topics
                             st.success("✅ Outliers reasignados exitosamente.")
                         except Exception as e:
-                            pass # Si falla o no hay outliers, seguimos
+                            pass
                     
                     df['Cluster_ID'] = topics
                     
-                    # ---------------------------------------------------------
-                    # VISUALIZACION
-                    # ---------------------------------------------------------
-                    
+                    # --- VISUALIZACION ---
                     freq = topic_model.get_topic_info()
                     freq_clean = freq[freq['Topic'] != -1].head(20)
-                    
-                    # Limpieza de nombres
                     freq_clean['Nombre_Tema'] = freq_clean['Name'].apply(lambda x: " ".join(x.split("_")[1:4]))
                     
                     col_res1, col_res2 = st.columns([2, 1])
@@ -346,19 +349,15 @@ if archivo and col_texto:
                             st.info("Se necesitan más temas para generar el mapa.")
 
                     st.markdown("---")
-                    
-                    # Nubes de Palabras (Ahora sí limpias)
                     st.subheader("Palabras Clave por Grupo")
                     
                     top_clusters = freq_clean['Topic'].tolist()[:6] 
                     cols_wc = st.columns(3)
                     
                     for i, topic_id in enumerate(top_clusters):
-                        # Al haber inyectado el vectorizer, get_topic ya viene limpio de stopwords
                         topic_words = topic_model.get_topic(topic_id)
                         if topic_words:
                             keywords_dict = {word: score for word, score in topic_words}
-                            
                             wc_cluster = WordCloud(width=400, height=250, background_color='white', 
                                                  colormap='viridis').generate_from_frequencies(keywords_dict)
                             
@@ -371,7 +370,6 @@ if archivo and col_texto:
                                 st.pyplot(fig_wc)
                                 plt.close()
 
-                    # Tabla de Outliers
                     outliers = df[df['Cluster_ID'] == -1]
                     if len(outliers) > 0:
                         st.markdown("---")
@@ -380,8 +378,8 @@ if archivo and col_texto:
 
                 except Exception as e:
                     st.error(f"Error: {e}")
-    
-    #5
+
+    # ---------------- TAB 5: BUSQUEDA ----------------
     with tabs[4]:
         st.subheader("Motor de Busqueda Semantica")
         query = st.text_input("Consulta:", placeholder="Ej: Problemas de infraestructura...")
@@ -406,7 +404,7 @@ if archivo and col_texto:
                     </div>
                     """, unsafe_allow_html=True)
 
-    #6
+    # ---------------- TAB 6: REDES ----------------
     with tabs[5]:
         st.subheader("Relaciones entre Entidades")
         if st.button("Generar Grafo", type="primary"):
