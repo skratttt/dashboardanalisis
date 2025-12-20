@@ -186,7 +186,7 @@ with st.sidebar:
             
             # --- FILTROS GLOBALES ---
             st.markdown("---")
-            st.header("🔍 Filtro Global")
+            st.header(" Filtro Global")
             filtro_palabra = st.text_input("Filtrar análisis por palabra clave:", placeholder="Ej: litio...")
             
             if filtro_palabra:
@@ -196,7 +196,7 @@ with st.sidebar:
             
             # --- BOTÓN DE DESCARGA ZIP (NUEVO) ---
             st.markdown("---")
-            st.header("📦 Descarga Masiva")
+            st.header("Descarga de todos recursos")
             
             if st.button("Generar Reporte Visual (ZIP)"):
                 if not figures_to_export:
