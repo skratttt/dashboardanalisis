@@ -334,96 +334,65 @@ if archivo and col_texto:
 
     # ---------------- TAB 3: LENGUAJE PROFUNDO ----------------
     with tabs[2]:
-        st.subheader(" Entidades y Conceptos")
-        
-        if st.button("Ejecutar Análisis de Entidades"):
+        if st.button("Ejecutar Analisis Completo de Lenguaje"):
             nlp = cargar_spacy()
-            full_text = " ".join(df[col_texto].tolist())[:1000000] # Límite para performance
+            # Unimos texto (limitado a 1M caracteres para velocidad)
+            full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            # 1. NUBE DE PALABRAS (Lo mantenemos, es bonito para portadas)
-            with st.expander("Ver Nube de Conceptos Generales"):
-                wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
-                fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
-                ax.imshow(wc, interpolation='bilinear')
-                ax.axis('off')
-                st.pyplot(fig)
-                plt.close()
+            # 1. NUBE DE PALABRAS (Ya usaba stopwords, esto estaba bien)
+            st.subheader("☁️ Nube de Conceptos")
+            wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
+            
+            fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
+            ax.imshow(wc, interpolation='bilinear')
+            ax.axis('off')
+            st.pyplot(fig)
+            plt.close()
 
             st.markdown("---")
             
-            # 2. DETECCIÓN DE ENTIDADES (NER)
-            with st.spinner("Extrayendo entidades..."):
-                doc = nlp(full_text)
-                
-                # Extracción con filtrado de stopwords
-                # Guardamos tuplas (Texto, Etiqueta)
-                entidades = []
-                for e in doc.ents:
-                    # Filtros básicos de limpieza: largo > 2 y que no sea stopword
-                    if len(e.text) > 2 and e.text.lower() not in all_stopwords:
-                        if e.label_ == "PER":
-                            entidades.append((e.text, "Persona"))
-                        elif e.label_ in ["ORG", "MISC"]:
-                            entidades.append((e.text, "Organización"))
-                        elif e.label_ in ["LOC", "GPE"]:
-                            entidades.append((e.text, "Lugar"))
-                
-                # Convertimos a DataFrame para facilitar el manejo
-                df_ents = pd.DataFrame(entidades, columns=['Entidad', 'Tipo'])
-                
-                if not df_ents.empty:
-                    # --- CONTROL DE RUIDO ---
-                    c_filter, c_metric = st.columns([2, 1])
-                    with c_filter:
-                        min_freq = st.slider("🧹 Filtrar ruido (Mínimo de menciones):", 1, 50, 3, 
-                                           help="Oculta entidades que aparecen pocas veces.")
-                    
-                    # Contamos frecuencia
-                    conteo = df_ents['Entidad'].value_counts().reset_index()
-                    conteo.columns = ['Entidad', 'Frecuencia']
-                    
-                    # Unimos con el tipo (tomamos el primero que encuentre para esa entidad)
-                    tipos = df_ents.drop_duplicates(subset='Entidad')[['Entidad', 'Tipo']]
-                    df_final = conteo.merge(tipos, on='Entidad')
-                    
-                    # Filtramos por el slider
-                    df_viz = df_final[df_final['Frecuencia'] >= min_freq]
-                    
-                    with c_metric:
-                        st.metric("Entidades Relevantes Detectadas", len(df_viz))
+            # 2. DETECCIÓN DE ENTIDADES (AQUÍ ESTABA EL PROBLEMA)
+            st.subheader(" Detección de Entidades (NER)")
+            doc = nlp(full_text)
+            
+            # --- CORRECCIÓN: FILTRAMOS USANDO TU LISTA DE STOPWORDS ---
+            # Antes: solo miraba el largo > 3
+            # Ahora: mira el largo Y que la palabra NO esté en tu lista negra
+            
+            per = [e.text for e in doc.ents if e.label_ == "PER" and len(e.text) > 3 and e.text.lower() not in all_stopwords]
+            org = [e.text for e in doc.ents if e.label_ in ["ORG", "MISC"] and len(e.text) > 2 and e.text.lower() not in all_stopwords]
+            loc = [e.text for e in doc.ents if e.label_ in ["LOC", "GPE"] and len(e.text) > 2 and e.text.lower() not in all_stopwords]
+            # -----------------------------------------------------------
 
-                    # --- VISUALIZACIÓN TREEMAP (MUCHO MEJOR QUE BARRAS) ---
-                    # El Treemap permite ver proporciones sin que las etiquetas se corten tanto
-                    
-                    st.subheader("Mapa de Actores Clave")
-                    
-                    # Selector de qué ver
-                    tipo_ver = st.selectbox("Selecciona Tipo de Entidad:", ["Todas", "Persona", "Organización", "Lugar"])
-                    
-                    if tipo_ver != "Todas":
-                        data_plot = df_viz[df_viz['Tipo'] == tipo_ver]
-                    else:
-                        data_plot = df_viz
+            def plot_entity(lista, titulo, color):
+                if lista:
+                    counts = pd.Series(lista).value_counts().head(10).sort_values()
+                    fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, 
+                                 color_discrete_sequence=[color])
+                    fig.update_layout(showlegend=False, height=450, margin=dict(l=150))
+                    # Forzamos ajuste de texto para nombres largos
+                    fig.update_yaxes(automargin=True)
+                    return fig
+                return None
 
-                    if len(data_plot) > 0:
-                        fig = px.treemap(data_plot, path=['Tipo', 'Entidad'], values='Frecuencia',
-                                       color='Frecuencia', color_continuous_scale='Blues',
-                                       title=f"Jerarquía de {tipo_ver} (Tamaño = Frecuencia)")
-                        fig.update_layout(margin = dict(t=50, l=25, r=25, b=25))
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Tabla detallada para los amantes de los datos
-                        with st.expander(" Ver Tabla de Datos"):
-                            st.dataframe(data_plot.sort_values('Frecuencia', ascending=False), use_container_width=True)
-                    else:
-                        st.warning(f"No hay entidades de tipo '{tipo_ver}' con más de {min_freq} menciones.")
-                
-                else:
-                    st.warning("No se detectaron entidades. Revisa si el idioma del modelo es correcto o si el texto está limpio.")
+            col_a, col_b = st.columns(2)
+            with col_a: 
+                fig = plot_entity(per, "Top Personas", "#4285F4")
+                if fig: st.plotly_chart(fig, use_container_width=True)
+                else: st.info("Sin Personas detectadas (o todas fueron filtradas)")
+
+            with col_b: 
+                fig = plot_entity(org, "Top Organizaciones", "#EA4335")
+                if fig: st.plotly_chart(fig, use_container_width=True)
+                else: st.info("Sin Organizaciones detectadas")
+
+            fig_loc = plot_entity(loc, "Top Lugares", "#34A853")
+            if fig_loc: st.plotly_chart(fig_loc, use_container_width=True)
+            else: st.info("Sin Lugares detectados")
 
             st.markdown("---")
             
-            # 3. N-GRAMAS (Lo dejamos igual, es útil)
+            # 3. N-GRAMAS (Ya usaba stopwords, esto estaba bien)
             st.subheader(" Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             
@@ -434,7 +403,7 @@ if archivo and col_texto:
                     fig_bi.update_layout(yaxis={'categoryorder':'total ascending'})
                     fig_bi.update_yaxes(automargin=True)
                     st.plotly_chart(fig_bi, use_container_width=True)
-                except: pass
+                except: st.warning("No hay suficientes datos para Bigramas")
 
             with c_tri:
                 try:
@@ -443,8 +412,7 @@ if archivo and col_texto:
                     fig_tri.update_layout(yaxis={'categoryorder':'total ascending'})
                     fig_tri.update_yaxes(automargin=True)
                     st.plotly_chart(fig_tri, use_container_width=True)
-                except: pass
-
+                except: st.warning("No hay suficientes datos para Trigramas")
     # ---------------- TAB 4: CLUSTERIZACION ----------------
     with tabs[3]:
         st.subheader("Detección de Patrones (Topic Modeling)")
