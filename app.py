@@ -15,13 +15,32 @@ from pyvis.network import Network
 import streamlit.components.v1 as components
 import tempfile
 import os
+import zipfile # <--- NUEVO
+import io      # <--- NUEVO
 
 # ==========================================
-# 0. CONFIGURACIÓN GLOBAL DE ESTILOS DE GRÁFICOS
+# 0. CONFIGURACIÓN GLOBAL Y RECOLECTOR
 # ==========================================
 pio.templates.default = "plotly_white"
 plt.rcParams['figure.facecolor'] = 'white'
 plt.rcParams['axes.facecolor'] = 'white'
+
+# Diccionario para ir guardando los gráficos que se generen
+figures_to_export = {} 
+
+def mostrar_y_guardar(fig, nombre_archivo, use_container_width=True):
+    """
+    Función helper que reemplaza a st.plotly_chart.
+    1. Muestra el gráfico en la app.
+    2. Lo guarda en el diccionario para el ZIP.
+    """
+    # Mostramos en pantalla
+    st.plotly_chart(fig, use_container_width=use_container_width)
+    
+    # Limpiamos el nombre para que sirva de archivo
+    clean_name = "".join(x for x in nombre_archivo if x.isalnum() or x in " -_").strip()
+    # Guardamos en el diccionario global
+    figures_to_export[clean_name] = fig
 
 # ==========================================
 # 1. CONFIGURACIÓN ESTILO STREAMLIT
@@ -32,11 +51,8 @@ st.markdown("""
 <style>
     .block-container {padding-top: 2rem;}
     h1, h2, h3 {font-family: 'Sans-serif'; color: #202124;}
+    .stApp {background-color: white;}
     
-    .stApp {
-        background-color: white;
-    }
-
     div.stButton > button[kind="primary"] {
         background-color: #1A73E8;
         color: white;
@@ -52,7 +68,6 @@ st.markdown("""
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         transform: translateY(-1px);
     }
-
     div.stButton > button[kind="secondary"] {
         background-color: white;
         color: #1A73E8;
@@ -60,7 +75,6 @@ st.markdown("""
         border-radius: 24px;
         font-weight: 600;
     }
-
     .stTabs [data-baseweb="tab-list"] {gap: 8px;}
     .stTabs [data-baseweb="tab"] {
         height: 45px;
@@ -111,40 +125,35 @@ def get_top_ngrams(corpus, n=2, top_k=10, stopwords=[]):
     words_freq = sorted(words_freq, key=lambda x: x[1], reverse=True)
     return pd.DataFrame(words_freq[:top_k], columns=['Frase', 'Frecuencia'])
 
-#3
+# ==========================================
+# 3. SIDEBAR Y CARGA DE DATOS
+# ==========================================
 with st.sidebar:
     st.header("Configuracion del Dataset")
     archivo = st.file_uploader("1. Subir Archivo (CSV)", type=["csv"])
     
     col_texto = None
     col_cat = None
-    col_fecha = None
+    col_fecha = None 
     custom_stopwords = []
 
     if archivo:
         try:
-            # --- LÓGICA DE DETECCIÓN INTELIGENTE DE SEPARADOR ---
+            # Detección inteligente de separador
             try:
-                # 1. Intentamos leer con punto y coma (Tu caso actual)
                 df = pd.read_csv(archivo, sep=';')
-                
-                # Si pandas leyó todo en 1 sola columna, es probable que el separador fuera coma
                 if df.shape[1] < 2:
-                    archivo.seek(0) # "Rebobinamos" el archivo al principio
+                    archivo.seek(0)
                     df = pd.read_csv(archivo, sep=',')
-                    
             except UnicodeDecodeError:
-                # 2. Si falla por tildes (error de encoding), probamos con 'latin-1'
                 archivo.seek(0)
                 df = pd.read_csv(archivo, sep=';', encoding='latin-1')
-            # ----------------------------------------------------
 
             st.success(f"Registros cargados: {len(df)}")
             cols = df.columns.tolist()
             
             idx_txt = 0
             for possible in ['texto', 'text', 'comentario', 'mensaje', 'descripcion', 'titulo']:
-                # Buscamos ignorando mayúsculas/minúsculas para ser más robustos
                 match = next((c for c in cols if possible.lower() == c.lower()), None)
                 if match:
                     idx_txt = cols.index(match)
@@ -152,7 +161,6 @@ with st.sidebar:
             
             col_texto = st.selectbox("2. Columna de TEXTO", cols, index=idx_txt)
             
-            # --- LIMPIEZA AUTOMÁTICA ---
             if col_texto:
                 def limpiar_texto_duro(txt):
                     if not isinstance(txt, str): return str(txt)
@@ -161,10 +169,9 @@ with st.sidebar:
                     t = t.replace("ee. uu.", "eeuu").replace("ee. uu", "eeuu")
                     t = t.replace("&quot;", "").replace("quot", "")
                     return t
-
                 df[col_texto] = df[col_texto].apply(limpiar_texto_duro)
 
-            st.info("Opcional: Agrupador (ej: Medio, Fuente)")
+            st.info("Opcional: Agrupador")
             col_cat = st.selectbox("3. Columna de AGRUPACIÓN", ["No aplicar"] + cols)
             
             st.info("Opcional: Análisis Temporal")
@@ -172,10 +179,12 @@ with st.sidebar:
                                    help="Debe ser una columna con fechas (ej: 2023-10-25)")
 
             st.header("Filtros de Texto")
-            stopwords_input = st.text_area("Palabras a ignorar (separadas por coma)", "el, la, los, un, una, de, del, y, o, que, por, para, con, se, su, noticia, tras, segun, hace, puede")
-            custom_stopwords = [x.strip() for x in stopwords_input.split(",")]
+            # Lista ampliada de stopwords
+            lista_defecto = "el, la, los, un, una, de, del, y, o, que, qué, quien, quién, por, para, con, se, su, sus, lo, las, al, como, cómo, mas, más, noticia, tras, segun, según, hace, puede, ser, es, son, fue, eran, era, habia, hay"
+            stopwords_input = st.text_area("Palabras a ignorar (separadas por coma)", lista_defecto, height=100)
+            custom_stopwords = [x.strip().lower() for x in stopwords_input.split(",")]
             
-            # --- FILTROS GLOBALES Y EXPORTACIÓN ---
+            # --- FILTROS GLOBALES ---
             st.markdown("---")
             st.header("🔍 Filtro Global")
             filtro_palabra = st.text_input("Filtrar análisis por palabra clave:", placeholder="Ej: litio...")
@@ -184,25 +193,44 @@ with st.sidebar:
                 mask = df[col_texto].str.contains(filtro_palabra, case=False, na=False)
                 df = df[mask]
                 st.success(f"Filtrado: {len(df)} registros contienen '{filtro_palabra}'")
-
-            st.markdown("---")
-            def convert_df(dataframe):
-                return dataframe.to_csv(index=False).encode('utf-8')
-            csv = convert_df(df)
-            st.download_button("📥 Descargar CSV Procesado", data=csv, file_name='procesado.csv', mime='text/csv')
             
+            # --- BOTÓN DE DESCARGA ZIP (NUEVO) ---
+            st.markdown("---")
+            st.header("📦 Descarga Masiva")
+            
+            if st.button("Generar Reporte Visual (ZIP)"):
+                if not figures_to_export:
+                    st.warning("No hay gráficos para descargar. Navega por las pestañas para generarlos primero.")
+                else:
+                    with st.spinner("Procesando imágenes (esto puede tardar unos segundos)..."):
+                        try:
+                            zip_buffer = io.BytesIO()
+                            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                                for nombre, fig in figures_to_export.items():
+                                    # Convertimos a PNG de alta calidad
+                                    img_bytes = fig.to_image(format="png", width=1200, height=700, scale=2)
+                                    zf.writestr(f"{nombre}.png", img_bytes)
+                            
+                            st.download_button(
+                                label="📥 Descargar ZIP con Gráficos",
+                                data=zip_buffer.getvalue(),
+                                file_name="reporte_graficos.zip",
+                                mime="application/zip"
+                            )
+                        except Exception as e:
+                            st.error(f"Error generando ZIP (¿Instalaste kaleido?): {e}")
+
         except Exception as e:
             st.error(f"Error al leer archivo: {e}")
 
 # ==========================================
 # 4. APLICACIÓN PRINCIPAL
-# ========================================
+# ==========================================
 if archivo and col_texto:
     df = df.dropna(subset=[col_texto])
     df[col_texto] = df[col_texto].astype(str)
     all_stopwords = get_stopwords(custom_stopwords)
 
-    # AGREGAMOS LA NUEVA PESTAÑA AL FINAL DE LA LISTA
     tabs = st.tabs(["Resumen Global", "Analisis de Sentimiento", "Lenguaje Profundo", "Clusterizacion (Temas)", "Busqueda", "Redes", "Evolución Temporal"])
 
     # ---------------- TAB 1: RESUMEN ----------------
@@ -225,7 +253,8 @@ if archivo and col_texto:
                 margin=dict(l=10, r=10, t=50, b=10)
             )
             fig.update_yaxes(automargin=True)
-            st.plotly_chart(fig, use_container_width=True)
+            # USAMOS LA NUEVA FUNCIÓN
+            mostrar_y_guardar(fig, f"Resumen_Distribucion_{col_cat}")
         else:
             st.info("Selecciona una columna de agrupación para ver estadísticas.")
 
@@ -269,10 +298,10 @@ if archivo and col_texto:
             
             with c1: 
                 st.markdown("##### Distribución Global")
-                st.plotly_chart(px.pie(df, names='Sentimiento', 
+                fig_pie = px.pie(df, names='Sentimiento', 
                                 color='Sentimiento', 
-                                color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}), 
-                                use_container_width=True)
+                                color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'})
+                mostrar_y_guardar(fig_pie, "Sentimiento_Global_Pie")
             
             with c2:
                 if col_cat != "No aplicar":
@@ -280,11 +309,7 @@ if archivo and col_texto:
                     
                     c_fil, _ = st.columns([1, 1])
                     with c_fil:
-                        opcion_top = st.selectbox(
-                            "Filtrar por volumen:", 
-                            ["Top 3", "Top 5", "Top 10", "Top 20", "Todos"],
-                            index=2 
-                        )
+                        opcion_top = st.selectbox("Filtrar por volumen:", ["Top 3", "Top 5", "Top 10", "Top 20", "Todos"], index=2)
                     
                     conteo_total = df[col_cat].value_counts()
                     
@@ -301,7 +326,7 @@ if archivo and col_texto:
                     n_categorias = df_grouped[col_cat].nunique()
                     alto_grafico = max(350, n_categorias * 40) 
 
-                    fig = px.bar(
+                    fig_bar = px.bar(
                         df_grouped, 
                         x="Porcentaje", 
                         y=col_cat, 
@@ -313,56 +338,44 @@ if archivo and col_texto:
                         height=alto_grafico 
                     )
                     
-                    fig.update_layout(
+                    fig_bar.update_layout(
                         xaxis_title="% del Total",
                         yaxis_title="",
                         legend_title=dict(text=""),
                         yaxis={'categoryorder':'total ascending'} 
                     )
-                    fig.update_traces(textposition='inside', textfont_color='white')
+                    fig_bar.update_traces(textposition='inside', textfont_color='white')
+                    mostrar_y_guardar(fig_bar, f"Sentimiento_Detalle_{col_cat}")
                     
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    with st.expander("📊 Ver Tabla de Datos Exactos", expanded=True):
+                    with st.expander(" Ver Tabla de Datos Exactos", expanded=True):
                         tabla = pd.crosstab(df_f[col_cat], df_f['Sentimiento'])
                         tabla['Total'] = tabla.sum(axis=1)
                         tabla = tabla.sort_values('Total', ascending=False)
                         st.dataframe(tabla, use_container_width=True)
-
                 else:
-                    st.info(f"Selecciona una columna de agrupación en la barra lateral para ver el detalle por categoría.")
+                    st.info(f"Selecciona una columna de agrupación en la barra lateral.")
 
     # ---------------- TAB 3: LENGUAJE PROFUNDO ----------------
     with tabs[2]:
         if st.button("Ejecutar Analisis Completo de Lenguaje"):
             nlp = cargar_spacy()
-            # Unimos texto (limitado a 1M caracteres para velocidad)
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            # 1. NUBE DE PALABRAS (Ya usaba stopwords, esto estaba bien)
             st.subheader(" Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
-            
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             ax.imshow(wc, interpolation='bilinear')
             ax.axis('off')
-            st.pyplot(fig)
+            st.pyplot(fig) # Wordcloud es matplotlib, no lo metemos al ZIP de plotly
             plt.close()
 
             st.markdown("---")
-            
-            # 2. DETECCIÓN DE ENTIDADES (AQUÍ ESTABA EL PROBLEMA)
-            st.subheader(" Detección de Entidades (NER)")
+            st.subheader("Deteccion de Entidades (NER)")
             doc = nlp(full_text)
             
-            # --- CORRECCIÓN: FILTRAMOS USANDO TU LISTA DE STOPWORDS ---
-            # Antes: solo miraba el largo > 3
-            # Ahora: mira el largo Y que la palabra NO esté en tu lista negra
-            
-            per = [e.text for e in doc.ents if e.label_ == "PER" and len(e.text) > 3 and e.text.lower() not in all_stopwords]
-            org = [e.text for e in doc.ents if e.label_ in ["ORG", "MISC"] and len(e.text) > 2 and e.text.lower() not in all_stopwords]
-            loc = [e.text for e in doc.ents if e.label_ in ["LOC", "GPE"] and len(e.text) > 2 and e.text.lower() not in all_stopwords]
-            # -----------------------------------------------------------
+            per = [e.text for e in doc.ents if e.label_ == "PER" and len(e.text)>3 and e.text.lower() not in all_stopwords]
+            org = [e.text for e in doc.ents if e.label_ in ["ORG", "MISC"] and len(e.text)>2 and e.text.lower() not in all_stopwords]
+            loc = [e.text for e in doc.ents if e.label_ in ["LOC", "GPE"] and len(e.text)>2 and e.text.lower() not in all_stopwords]
 
             def plot_entity(lista, titulo, color):
                 if lista:
@@ -370,30 +383,27 @@ if archivo and col_texto:
                     fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, 
                                  color_discrete_sequence=[color])
                     fig.update_layout(showlegend=False, height=450, margin=dict(l=150))
-                    # Forzamos ajuste de texto para nombres largos
                     fig.update_yaxes(automargin=True)
                     return fig
                 return None
 
             col_a, col_b = st.columns(2)
             with col_a: 
-                fig = plot_entity(per, "Top Personas", "#4285F4")
-                if fig: st.plotly_chart(fig, use_container_width=True)
-                else: st.info("Sin Personas detectadas (o todas fueron filtradas)")
+                fig_per = plot_entity(per, "Top Personas", "#4285F4")
+                if fig_per: mostrar_y_guardar(fig_per, "Entidades_Personas")
+                else: st.info("Sin Personas")
 
             with col_b: 
-                fig = plot_entity(org, "Top Organizaciones", "#EA4335")
-                if fig: st.plotly_chart(fig, use_container_width=True)
-                else: st.info("Sin Organizaciones detectadas")
+                fig_org = plot_entity(org, "Top Organizaciones", "#EA4335")
+                if fig_org: mostrar_y_guardar(fig_org, "Entidades_Organizaciones")
+                else: st.info("Sin Organizaciones")
 
             fig_loc = plot_entity(loc, "Top Lugares", "#34A853")
-            if fig_loc: st.plotly_chart(fig_loc, use_container_width=True)
-            else: st.info("Sin Lugares detectados")
+            if fig_loc: mostrar_y_guardar(fig_loc, "Entidades_Lugares")
+            else: st.info("Sin Lugares")
 
             st.markdown("---")
-            
-            # 3. N-GRAMAS (Ya usaba stopwords, esto estaba bien)
-            st.subheader(" Frases Recurrentes (N-Gramas)")
+            st.subheader("Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             
             with c_bi:
@@ -401,42 +411,34 @@ if archivo and col_texto:
                     df_bi = get_top_ngrams(df[col_texto], n=2, top_k=10, stopwords=all_stopwords)
                     fig_bi = px.bar(df_bi, x='Frecuencia', y='Frase', orientation='h', title="Top Bigramas", color='Frecuencia')
                     fig_bi.update_layout(yaxis={'categoryorder':'total ascending'})
-                    fig_bi.update_yaxes(automargin=True)
-                    st.plotly_chart(fig_bi, use_container_width=True)
-                except: st.warning("No hay suficientes datos para Bigramas")
+                    mostrar_y_guardar(fig_bi, "Bigramas")
+                except: st.warning("No hay suficientes datos")
 
             with c_tri:
                 try:
                     df_tri = get_top_ngrams(df[col_texto], n=3, top_k=10, stopwords=all_stopwords)
                     fig_tri = px.bar(df_tri, x='Frecuencia', y='Frase', orientation='h', title="Top Trigramas", color='Frecuencia')
                     fig_tri.update_layout(yaxis={'categoryorder':'total ascending'})
-                    fig_tri.update_yaxes(automargin=True)
-                    st.plotly_chart(fig_tri, use_container_width=True)
-                except: st.warning("No hay suficientes datos para Trigramas")
+                    mostrar_y_guardar(fig_tri, "Trigramas")
+                except: st.warning("No hay suficientes datos")
+
     # ---------------- TAB 4: CLUSTERIZACION ----------------
     with tabs[3]:
         st.subheader("Detección de Patrones (Topic Modeling)")
         
         c_controls_1, c_controls_2 = st.columns(2)
         with c_controls_1:
-            n_topics_aprox = st.slider("Número de Temas Deseados", 2, 50, 5, 
-                                     help="El modelo fusionará temas hasta llegar a este número.")
+            n_topics_aprox = st.slider("Número de Temas Deseados", 2, 50, 5)
         with c_controls_2:
-            force_assign = st.checkbox("Forzar asignación de Outliers", value=True, 
-                                     help="Intenta reasignar los documentos marcados como -1 al tema más cercano.")
+            force_assign = st.checkbox("Forzar asignación de Outliers", value=True)
 
         if st.button("Ejecutar Clustering", type="primary"):
             with st.spinner("Generando Embeddings y Clusters..."):
                 try:
-                    # 1. Preparar Embeddings
                     embedding_model = cargar_modelo_embeddings()
                     docs = df[col_texto].tolist()
                     embeddings = embedding_model.encode(docs, show_progress_bar=False)
-
-                    # 2. Configurar Vectorizer con STOPWORDS
                     vectorizer_model = CountVectorizer(stop_words=all_stopwords, min_df=2)
-
-                    # 3. Configurar BERTopic
                     min_size = max(5, int(len(docs) * 0.005))
                     
                     topic_model = BERTopic(
@@ -448,69 +450,55 @@ if archivo and col_texto:
                         verbose=True
                     )
                     
-                    # 4. Entrenar Modelo
                     topics, probs = topic_model.fit_transform(docs, embeddings)
                     
-                    # 5. Reasignar Outliers
                     if force_assign:
                         try:
                             new_topics = topic_model.reduce_outliers(docs, topics, strategy="embeddings", embeddings=embeddings)
                             topic_model.update_topics(docs, topics=new_topics, vectorizer_model=vectorizer_model)
                             topics = new_topics
-                            st.success(" Outliers reasignados exitosamente.")
-                        except Exception as e:
-                            pass
+                        except: pass
                     
                     df['Cluster_ID'] = topics
                     
-                    # --- VISUALIZACION ---
                     freq = topic_model.get_topic_info()
                     freq_clean = freq[freq['Topic'] != -1].head(20)
                     freq_clean['Nombre_Tema'] = freq_clean['Name'].apply(lambda x: " ".join(x.split("_")[1:4]))
                     
                     col_res1, col_res2 = st.columns([2, 1])
-                    
                     with col_res1:
                         st.markdown("#### Distribución de Temas")
                         fig_bar = px.bar(freq_clean, x='Count', y='Nombre_Tema', orientation='h', 
                                          text_auto=True, title="Temas Detectados", color='Count')
                         fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, showlegend=False)
-                        st.plotly_chart(fig_bar, use_container_width=True)
+                        mostrar_y_guardar(fig_bar, "Cluster_Distribucion_Temas")
                         
                     with col_res2:
                         st.markdown("#### Mapa Intertópico")
                         try:
-                            st.plotly_chart(topic_model.visualize_topics(), use_container_width=True)
+                            # Visualización compleja, a veces falla al exportar estático, pero intentamos
+                            fig_inter = topic_model.visualize_topics()
+                            mostrar_y_guardar(fig_inter, "Cluster_Mapa_Intertopico")
                         except:
                             st.info("Se necesitan más temas para generar el mapa.")
 
                     st.markdown("---")
                     st.subheader("Palabras Clave por Grupo")
-                    
                     top_clusters = freq_clean['Topic'].tolist()[:6] 
                     cols_wc = st.columns(3)
-                    
                     for i, topic_id in enumerate(top_clusters):
                         topic_words = topic_model.get_topic(topic_id)
                         if topic_words:
                             keywords_dict = {word: score for word, score in topic_words}
                             wc_cluster = WordCloud(width=400, height=250, background_color='white', 
                                                  colormap='viridis').generate_from_frequencies(keywords_dict)
-                            
                             with cols_wc[i % 3]:
-                                name_clean = freq_clean[freq_clean['Topic']==topic_id]['Nombre_Tema'].values[0]
-                                st.markdown(f"**Grupo {topic_id}:** {name_clean}")
+                                st.markdown(f"**Grupo {topic_id}**")
                                 fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
                                 ax_wc.imshow(wc_cluster, interpolation='bilinear')
                                 ax_wc.axis('off')
                                 st.pyplot(fig_wc)
                                 plt.close()
-
-                    outliers = df[df['Cluster_ID'] == -1]
-                    if len(outliers) > 0:
-                        st.markdown("---")
-                        with st.expander(f"Ver {len(outliers)} documentos sin clasificar"):
-                            st.dataframe(outliers[[col_texto]])
 
                 except Exception as e:
                     st.error(f"Error: {e}")
@@ -519,26 +507,20 @@ if archivo and col_texto:
     with tabs[4]:
         st.subheader("Motor de Busqueda Semantica")
         query = st.text_input("Consulta:", placeholder="Ej: Problemas de infraestructura...")
-        
         if query:
             with st.spinner("Buscando..."):
                 model_emb = cargar_modelo_embeddings()
                 corpus_emb = model_emb.encode(df[col_texto].tolist(), convert_to_tensor=True)
                 query_emb = model_emb.encode(query, convert_to_tensor=True)
                 hits = util.semantic_search(query_emb, corpus_emb, top_k=5)[0]
-                
                 st.markdown("### Resultados")
                 for hit in hits:
                     idx = hit['corpus_id']
                     score = hit['score']
                     txt = df.iloc[idx][col_texto]
                     cat_val = df.iloc[idx][col_cat] if col_cat != "No aplicar" else "-"
-                    st.markdown(f"""
-                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #e0e0e0;">
-                        <small style="color: #1A73E8;"><b>Relevancia: {score:.2f}</b> | {cat_val}</small><br>
-                        <span style="color: #202124;">{txt}</span>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(f"""<div style="background-color:#f8f9fa;padding:15px;margin-bottom:10px;">
+                        <small><b>Relevancia: {score:.2f}</b> | {cat_val}</small><br>{txt}</div>""", unsafe_allow_html=True)
 
     # ---------------- TAB 6: REDES ----------------
     with tabs[5]:
@@ -548,31 +530,26 @@ if archivo and col_texto:
                 nlp = cargar_spacy()
                 sample_df = df.head(1000)
                 docs = list(nlp.pipe(sample_df[col_texto].astype(str), disable=["tok2vec", "tagger", "parser", "attribute_ruler", "lemmatizer"]))
-                
                 entity_list = []
                 for doc in docs:
                     ents = sorted(list(set([e.text for e in doc.ents if e.label_ in ["PER", "ORG"] and len(e.text) > 3])))
                     if len(ents) > 1:
                         entity_list.append(ents)
-
                 G = nx.Graph()
                 co_occurrences = {}
                 node_counts = {}
-
                 for ents in entity_list:
                     for i in range(len(ents)):
                         node_counts[ents[i]] = node_counts.get(ents[i], 0) + 1
                         for j in range(i + 1, len(ents)):
                             pair = tuple(sorted((ents[i], ents[j])))
                             co_occurrences[pair] = co_occurrences.get(pair, 0) + 1
-
                 top_nodes = sorted(node_counts, key=node_counts.get, reverse=True)[:40]
                 for node in top_nodes:
-                    G.add_node(node, size=node_counts[node]*2, title=f"Frecuencia: {node_counts[node]}")
+                    G.add_node(node, size=node_counts[node]*2)
                 for (source, target), weight in co_occurrences.items():
                     if source in top_nodes and target in top_nodes:
-                        G.add_edge(source, target, value=weight, title=f"Co-ocurrencias: {weight}")
-
+                        G.add_edge(source, target, value=weight)
                 if len(G.nodes) > 0:
                     net = Network(height="600px", width="100%", bgcolor="#ffffff", font_color="#202124")
                     net.from_nx(G)
@@ -586,132 +563,53 @@ if archivo and col_texto:
                 else:
                     st.warning("No se encontraron suficientes relaciones.")
 
-    # ---------------- TAB 7: EVOLUCIÓN TEMPORAL (NUEVA) ----------------
+    # ---------------- TAB 7: EVOLUCIÓN TEMPORAL ----------------
     with tabs[6]:
         st.subheader(" Evolución de Noticias en el Tiempo")
         
         if col_fecha != "No aplicar":
-            # 1. PREPARACIÓN DE DATOS (Convertir fecha)
             try:
                 df_time = df.copy()
                 df_time[col_fecha] = pd.to_datetime(df_time[col_fecha], errors='coerce')
-                
-                # Eliminamos fechas invalidas
                 df_time = df_time.dropna(subset=[col_fecha])
                 
                 if len(df_time) > 0:
-                    # Filtro de Intervalo
                     c_time_1, c_time_2 = st.columns([1, 3])
                     with c_time_1:
-                        intervalo = st.select_slider(
-                            "Agrupar por:", 
-                            options=["D", "W", "M", "Y"], 
-                            value="D", 
-                            format_func=lambda x: {"D":"Día", "W":"Semana", "M":"Mes", "Y":"Año"}[x]
-                        )
+                        intervalo = st.select_slider("Agrupar por:", options=["D", "W", "M", "Y"], value="D")
                     
                     st.markdown("---")
-
-                    # 2. GRÁFICO DE VOLUMEN
-                    st.markdown("##### Tendencia de Publicación (Volumen)")
+                    st.markdown("#####  Tendencia de Publicación (Volumen)")
                     
                     volumen = df_time.set_index(col_fecha).resample(intervalo).size().reset_index(name='Cantidad')
-                    
-                    fig_vol = px.line(
-                        volumen, 
-                        x=col_fecha, 
-                        y='Cantidad', 
-                        markers=True, 
-                        title="Cantidad de Noticias por Periodo",
-                        line_shape='spline',
-                        render_mode='svg'
-                    )
+                    fig_vol = px.line(volumen, x=col_fecha, y='Cantidad', markers=True, title="Noticias por Periodo", line_shape='spline')
                     fig_vol.update_layout(xaxis_title="Fecha", yaxis_title="N° Documentos")
-                    st.plotly_chart(fig_vol, use_container_width=True)
+                    mostrar_y_guardar(fig_vol, "Temporal_Volumen")
 
-                    # 3. SENTIMIENTO EN EL TIEMPO
                     if 'Sentimiento' in df_time.columns:
                         st.markdown("---")
-                        st.markdown("##### Evolución del Sentimiento")
-                        
+                        st.markdown("##### ❤️ Evolución del Sentimiento")
                         sent_time = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), 'Sentimiento']).size().reset_index(name='Conteo')
-                        
-                        fig_sent = px.area(
-                            sent_time, 
-                            x=col_fecha, 
-                            y='Conteo', 
-                            color='Sentimiento',
-                            color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'},
-                            title="Sentimiento Acumulado en el Tiempo"
-                        )
-                        st.plotly_chart(fig_sent, use_container_width=True)
-                    else:
-                        st.info("💡 Consejo: Ejecuta el 'Análisis de Sentimiento' en la Pestaña 2 para ver su evolución aquí.")
+                        fig_sent = px.area(sent_time, x=col_fecha, y='Conteo', color='Sentimiento',
+                                           color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'},
+                                           title="Sentimiento Acumulado")
+                        mostrar_y_guardar(fig_sent, "Temporal_Sentimiento_Area")
 
-                    # 4. HEATMAP (Si aplica)
-                    # ---------------------------------------------------------
-                    # 4. MATRIZ DE INTENSIDAD (HEATMAP MEJORADO)
-                    # ---------------------------------------------------------
                     if col_cat != "No aplicar":
                         st.markdown("---")
-                        st.subheader(f" Matriz de Intensidad: {col_cat} vs Tiempo")
-                        st.caption("Identifica patrones de publicación: ¿Qué medios concentran la agenda y cuándo?")
+                        st.markdown(f"##### 🔥 Mapa de Calor: {col_cat} vs Tiempo")
+                        heatmap_data = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), col_cat]).size().reset_index(name='Menciones')
+                        heatmap_pivot = heatmap_data.pivot(index=col_cat, columns=col_fecha, values='Menciones').fillna(0)
                         
-                        # A. PREPARACIÓN DE DATOS
-                        # Agrupamos por Fecha y Categoría (Fuente)
-                        heatmap_data = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), col_cat]).size().reset_index(name='Cantidad')
-                        
-                        # B. FILTRO DE LOS "TOP PLAYERS"
-                        # Para que el gráfico sea legible, nos quedamos con los N principales
-                        n_top_heatmap = st.slider("Cantidad de fuentes a mostrar:", 5, 50, 15)
-                        
-                        # Calculamos el volumen total por fuente para ordenar
-                        top_fuentes = heatmap_data.groupby(col_cat)['Cantidad'].sum().nlargest(n_top_heatmap).index.tolist()
-                        
-                        # Filtramos la data para usar solo esos tops
-                        heatmap_data_filtered = heatmap_data[heatmap_data[col_cat].isin(top_fuentes)]
-                        
-                        # C. PIVOT (Transformar a Matriz)
-                        # Filas = Fuentes (Ordenadas por volumen), Columnas = Fechas
-                        heatmap_pivot = heatmap_data_filtered.pivot(index=col_cat, columns=col_fecha, values='Cantidad').fillna(0)
-                        
-                        # Reordenamos el índice para que los más activos salgan ARRIBA
-                        heatmap_pivot = heatmap_pivot.reindex(top_fuentes)
-                        
-                        # D. VISUALIZACIÓN PROFESIONAL
-                        fig_heat = px.imshow(
-                            heatmap_pivot, 
-                            aspect="auto", 
-                            color_continuous_scale="Reds", # Escala de rojos (clásica de intensidad)
-                            text_auto=True if len(heatmap_pivot.columns) < 30 else False, # Muestra números si hay pocas columnas
-                            labels=dict(x="Fecha", y=col_cat, color="Noticias"),
-                            title=f"Concentración de Publicaciones (Top {n_top_heatmap})"
-                        )
-                        
-                        fig_heat.update_layout(
-                            # Separación entre cuadritos para limpieza visual
-                            xaxis_nticks=20,
-                            yaxis_nticks=len(top_fuentes)
-                        )
-                        # Truco visual: Bordes blancos entre celdas para que parezca tabla
-                        fig_heat.update_traces(xgap=1, ygap=1)
-                        
-                        st.plotly_chart(fig_heat, use_container_width=True)
-                        
-                        # E. HALLAZGOS AUTOMÁTICOS (El "insumo" extra)
-                        with st.expander("Ver Hallazgos de la Matriz"):
-                            dia_max = heatmap_data_filtered.loc[heatmap_data_filtered['Cantidad'].idxmax()]
-                            st.markdown(f"""
-                            * **Pico Máximo:** El medio **{dia_max[col_cat]}** tuvo su mayor actividad el **{dia_max[col_fecha].strftime('%d-%m-%Y')}** con **{dia_max['Cantidad']}** noticias.
-                            * **Fuente Dominante:** **{top_fuentes[0]}** es la fuente con mayor volumen acumulado en el periodo.
-                            """)
+                        fig_heat = px.imshow(heatmap_pivot, aspect="auto", color_continuous_scale="Viridis", origin='lower')
+                        mostrar_y_guardar(fig_heat, f"Temporal_Heatmap_{col_cat}")
+
                 else:
-                    st.error(" No se encontraron fechas válidas. Revisa que el formato en tu CSV sea leíble (ej: YYYY-MM-DD).")
-            
+                    st.error("No se encontraron fechas válidas.")
             except Exception as e:
-                st.error(f"Error procesando las fechas: {e}")
+                st.error(f"Error procesando fechas: {e}")
         else:
-            st.warning("Por favor, selecciona una columna de **FECHA** en la barra lateral para activar este análisis.")
+            st.warning("Selecciona una columna de FECHA en la barra lateral.")
 
 else:
     st.info("Sube un archivo CSV para comenzar.")
