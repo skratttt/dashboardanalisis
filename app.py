@@ -261,7 +261,7 @@ if archivo and col_texto:
         if st.session_state.sentimiento_data is not None:
             df['Sentimiento'] = st.session_state.sentimiento_data
             
-            if st.button("🔄 Reiniciar Análisis", type="secondary"):
+            if st.button(" Reiniciar Análisis", type="secondary"):
                 st.session_state.sentimiento_data = None
                 st.rerun()
 
@@ -340,7 +340,7 @@ if archivo and col_texto:
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
             # 1. NUBE DE PALABRAS (Ya usaba stopwords, esto estaba bien)
-            st.subheader("☁️ Nube de Conceptos")
+            st.subheader(" Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
@@ -352,7 +352,7 @@ if archivo and col_texto:
             st.markdown("---")
             
             # 2. DETECCIÓN DE ENTIDADES (AQUÍ ESTABA EL PROBLEMA)
-            st.subheader("🕵️ Detección de Entidades (NER)")
+            st.subheader("Detección de Entidades (NER)")
             doc = nlp(full_text)
             
             # --- CORRECCIÓN: FILTRAMOS USANDO TU LISTA DE STOPWORDS ---
@@ -393,7 +393,7 @@ if archivo and col_texto:
             st.markdown("---")
             
             # 3. N-GRAMAS (Ya usaba stopwords, esto estaba bien)
-            st.subheader("🔠 Frases Recurrentes (N-Gramas)")
+            st.subheader(" Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             
             with c_bi:
