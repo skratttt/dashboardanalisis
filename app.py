@@ -336,10 +336,13 @@ if archivo and col_texto:
     with tabs[2]:
         if st.button("Ejecutar Analisis Completo de Lenguaje"):
             nlp = cargar_spacy()
+            # Unimos texto (limitado a 1M caracteres para velocidad)
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            st.subheader(" Nube de Conceptos")
+            # 1. NUBE DE PALABRAS (Ya usaba stopwords, esto estaba bien)
+            st.subheader("☁️ Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
+            
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             ax.imshow(wc, interpolation='bilinear')
             ax.axis('off')
@@ -347,12 +350,19 @@ if archivo and col_texto:
             plt.close()
 
             st.markdown("---")
-            st.subheader("Deteccion de Entidades (NER)")
+            
+            # 2. DETECCIÓN DE ENTIDADES (AQUÍ ESTABA EL PROBLEMA)
+            st.subheader("🕵️ Detección de Entidades (NER)")
             doc = nlp(full_text)
             
-            per = [e.text for e in doc.ents if e.label_ == "PER" and len(e.text)>3]
-            org = [e.text for e in doc.ents if e.label_ in ["ORG", "MISC"] and len(e.text)>2]
-            loc = [e.text for e in doc.ents if e.label_ in ["LOC", "GPE"] and len(e.text)>2]
+            # --- CORRECCIÓN: FILTRAMOS USANDO TU LISTA DE STOPWORDS ---
+            # Antes: solo miraba el largo > 3
+            # Ahora: mira el largo Y que la palabra NO esté en tu lista negra
+            
+            per = [e.text for e in doc.ents if e.label_ == "PER" and len(e.text) > 3 and e.text.lower() not in all_stopwords]
+            org = [e.text for e in doc.ents if e.label_ in ["ORG", "MISC"] and len(e.text) > 2 and e.text.lower() not in all_stopwords]
+            loc = [e.text for e in doc.ents if e.label_ in ["LOC", "GPE"] and len(e.text) > 2 and e.text.lower() not in all_stopwords]
+            # -----------------------------------------------------------
 
             def plot_entity(lista, titulo, color):
                 if lista:
@@ -360,6 +370,8 @@ if archivo and col_texto:
                     fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, 
                                  color_discrete_sequence=[color])
                     fig.update_layout(showlegend=False, height=450, margin=dict(l=150))
+                    # Forzamos ajuste de texto para nombres largos
+                    fig.update_yaxes(automargin=True)
                     return fig
                 return None
 
@@ -367,19 +379,21 @@ if archivo and col_texto:
             with col_a: 
                 fig = plot_entity(per, "Top Personas", "#4285F4")
                 if fig: st.plotly_chart(fig, use_container_width=True)
-                else: st.info("Sin Personas")
+                else: st.info("Sin Personas detectadas (o todas fueron filtradas)")
 
             with col_b: 
                 fig = plot_entity(org, "Top Organizaciones", "#EA4335")
                 if fig: st.plotly_chart(fig, use_container_width=True)
-                else: st.info("Sin Organizaciones")
+                else: st.info("Sin Organizaciones detectadas")
 
             fig_loc = plot_entity(loc, "Top Lugares", "#34A853")
             if fig_loc: st.plotly_chart(fig_loc, use_container_width=True)
-            else: st.info("Sin Lugares")
+            else: st.info("Sin Lugares detectados")
 
             st.markdown("---")
-            st.subheader("Frases Recurrentes (N-Gramas)")
+            
+            # 3. N-GRAMAS (Ya usaba stopwords, esto estaba bien)
+            st.subheader("🔠 Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             
             with c_bi:
@@ -387,6 +401,7 @@ if archivo and col_texto:
                     df_bi = get_top_ngrams(df[col_texto], n=2, top_k=10, stopwords=all_stopwords)
                     fig_bi = px.bar(df_bi, x='Frecuencia', y='Frase', orientation='h', title="Top Bigramas", color='Frecuencia')
                     fig_bi.update_layout(yaxis={'categoryorder':'total ascending'})
+                    fig_bi.update_yaxes(automargin=True)
                     st.plotly_chart(fig_bi, use_container_width=True)
                 except: st.warning("No hay suficientes datos para Bigramas")
 
@@ -395,6 +410,7 @@ if archivo and col_texto:
                     df_tri = get_top_ngrams(df[col_texto], n=3, top_k=10, stopwords=all_stopwords)
                     fig_tri = px.bar(df_tri, x='Frecuencia', y='Frase', orientation='h', title="Top Trigramas", color='Frecuencia')
                     fig_tri.update_layout(yaxis={'categoryorder':'total ascending'})
+                    fig_tri.update_yaxes(automargin=True)
                     st.plotly_chart(fig_tri, use_container_width=True)
                 except: st.warning("No hay suficientes datos para Trigramas")
 
