@@ -19,13 +19,12 @@ import zipfile
 import io      
 
 # ==========================================
-# 0. CONFIGURACIÓN GLOBAL Y RECOLECTOR (CORREGIDO CON SESSION STATE)
+# 0. CONFIGURACIÓN GLOBAL Y RECOLECTOR
 # ==========================================
 pio.templates.default = "plotly_white"
 plt.rcParams['figure.facecolor'] = 'white'
 plt.rcParams['axes.facecolor'] = 'white'
 
-# --- CORRECCIÓN CLAVE: USAMOS MEMORIA PERMANENTE ---
 if 'figures_to_export' not in st.session_state:
     st.session_state.figures_to_export = {}
 
@@ -36,10 +35,7 @@ def mostrar_y_guardar(fig, nombre_archivo, use_container_width=True):
     """
     st.plotly_chart(fig, use_container_width=use_container_width)
     
-    # Limpiamos nombre
     clean_name = "".join(x for x in nombre_archivo if x.isalnum() or x in " -_").strip()
-    
-    # GUARDAMOS EN SESSION STATE
     st.session_state.figures_to_export[clean_name] = fig
 
 # ==========================================
@@ -138,16 +134,14 @@ with st.sidebar:
     custom_stopwords = []
 
     if archivo:
-        # --- LIMPIEZA DE MEMORIA AL CAMBIAR DE ARCHIVO ---
+        # Limpieza de memoria al cambiar archivo
         file_id = f"{archivo.name}-{archivo.size}"
         if 'last_file_id' not in st.session_state or st.session_state.last_file_id != file_id:
-            st.session_state.figures_to_export = {} # Borramos gráficos viejos
+            st.session_state.figures_to_export = {}
             st.session_state.last_file_id = file_id
-            st.session_state.sentimiento_data = None # Borramos sentimientos viejos
-        # -------------------------------------------------
+            st.session_state.sentimiento_data = None
 
         try:
-            # Detección inteligente de separador
             try:
                 df = pd.read_csv(archivo, sep=';')
                 if df.shape[1] < 2:
@@ -187,12 +181,10 @@ with st.sidebar:
                                    help="Debe ser una columna con fechas (ej: 2023-10-25)")
 
             st.header("Filtros de Texto")
-            # Lista ampliada de stopwords
             lista_defecto = "el, la, los, un, una, de, del, y, o, que, qué, quien, quién, por, para, con, se, su, sus, lo, las, al, como, cómo, mas, más, noticia, tras, segun, según, hace, puede, ser, es, son, fue, eran, era, habia, hay"
             stopwords_input = st.text_area("Palabras a ignorar (separadas por coma)", lista_defecto, height=100)
             custom_stopwords = [x.strip().lower() for x in stopwords_input.split(",")]
             
-            # --- FILTROS GLOBALES ---
             st.markdown("---")
             st.header("🔍 Filtro Global")
             filtro_palabra = st.text_input("Filtrar análisis por palabra clave:", placeholder="Ej: litio...")
@@ -202,18 +194,15 @@ with st.sidebar:
                 df = df[mask]
                 st.success(f"Filtrado: {len(df)} registros contienen '{filtro_palabra}'")
             
-            # --- BOTÓN DE DESCARGA ZIP (CORREGIDO) ---
             st.markdown("---")
-            st.header(" Descarga Masiva")
+            st.header(" Descarga De recursos")
             
             if st.button("Generar Reporte Visual (ZIP)"):
-                # Leemos de Session State
                 graficos = st.session_state.figures_to_export
-                
                 if not graficos:
                     st.warning("No hay gráficos en memoria. Navega por las pestañas para generarlos primero.")
                 else:
-                    with st.spinner(f" Procesando {len(graficos)} gráficos..."):
+                    with st.spinner(f"Procesando {len(graficos)} gráficos..."):
                         try:
                             zip_buffer = io.BytesIO()
                             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -222,7 +211,7 @@ with st.sidebar:
                                     zf.writestr(f"{nombre}.png", img_bytes)
                             
                             st.download_button(
-                                label=f" Descargar ZIP ({len(graficos)} gráficos)",
+                                label=f"Descargar ZIP ({len(graficos)} gráficos)",
                                 data=zip_buffer.getvalue(),
                                 file_name="reporte_graficos.zip",
                                 mime="application/zip"
@@ -304,24 +293,19 @@ if archivo and col_texto:
                 st.rerun()
 
             c1, c2 = st.columns([1, 2])
-            
             with c1: 
                 st.markdown("##### Distribución Global")
-                fig_pie = px.pie(df, names='Sentimiento', 
-                                color='Sentimiento', 
-                                color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'})
+                fig_pie = px.pie(df, names='Sentimiento', color='Sentimiento', color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'})
                 mostrar_y_guardar(fig_pie, "Sentimiento_Global_Pie")
             
             with c2:
                 if col_cat != "No aplicar":
                     st.markdown(f"##### Comparativa por {col_cat}")
-                    
                     c_fil, _ = st.columns([1, 1])
                     with c_fil:
                         opcion_top = st.selectbox("Filtrar por volumen:", ["Top 3", "Top 5", "Top 10", "Top 20", "Todos"], index=2)
                     
                     conteo_total = df[col_cat].value_counts()
-                    
                     if opcion_top != "Todos":
                         n_top = int(opcion_top.split(" ")[1])
                         cats_to_keep = conteo_total.head(n_top).index
@@ -335,24 +319,11 @@ if archivo and col_texto:
                     n_categorias = df_grouped[col_cat].nunique()
                     alto_grafico = max(350, n_categorias * 40) 
 
-                    fig_bar = px.bar(
-                        df_grouped, 
-                        x="Porcentaje", 
-                        y=col_cat, 
-                        color="Sentimiento", 
-                        orientation='h',
-                        text_auto='.0f', 
-                        hover_data={'Porcentaje':':.1f', 'Conteo':True},
-                        color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'},
-                        height=alto_grafico 
+                    fig_bar = px.bar(df_grouped, x="Porcentaje", y=col_cat, color="Sentimiento", orientation='h',
+                        text_auto='.0f', hover_data={'Porcentaje':':.1f', 'Conteo':True},
+                        color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}, height=alto_grafico 
                     )
-                    
-                    fig_bar.update_layout(
-                        xaxis_title="% del Total",
-                        yaxis_title="",
-                        legend_title=dict(text=""),
-                        yaxis={'categoryorder':'total ascending'} 
-                    )
+                    fig_bar.update_layout(xaxis_title="% del Total", yaxis_title="", legend_title=dict(text=""), yaxis={'categoryorder':'total ascending'})
                     fig_bar.update_traces(textposition='inside', textfont_color='white')
                     mostrar_y_guardar(fig_bar, f"Sentimiento_Detalle_{col_cat}")
                     
@@ -389,8 +360,7 @@ if archivo and col_texto:
             def plot_entity(lista, titulo, color):
                 if lista:
                     counts = pd.Series(lista).value_counts().head(10).sort_values()
-                    fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, 
-                                 color_discrete_sequence=[color])
+                    fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, color_discrete_sequence=[color])
                     fig.update_layout(showlegend=False, height=450, margin=dict(l=150))
                     fig.update_yaxes(automargin=True)
                     return fig
@@ -414,7 +384,6 @@ if archivo and col_texto:
             st.markdown("---")
             st.subheader("Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
-            
             with c_bi:
                 try:
                     df_bi = get_top_ngrams(df[col_texto], n=2, top_k=10, stopwords=all_stopwords)
@@ -422,7 +391,6 @@ if archivo and col_texto:
                     fig_bi.update_layout(yaxis={'categoryorder':'total ascending'})
                     mostrar_y_guardar(fig_bi, "Bigramas")
                 except: st.warning("No hay suficientes datos")
-
             with c_tri:
                 try:
                     df_tri = get_top_ngrams(df[col_texto], n=3, top_k=10, stopwords=all_stopwords)
@@ -450,14 +418,8 @@ if archivo and col_texto:
                     vectorizer_model = CountVectorizer(stop_words=all_stopwords, min_df=2)
                     min_size = max(5, int(len(docs) * 0.005))
                     
-                    topic_model = BERTopic(
-                        language="multilingual", 
-                        min_topic_size=min_size,
-                        nr_topics=n_topics_aprox,
-                        vectorizer_model=vectorizer_model,
-                        calculate_probabilities=True, 
-                        verbose=True
-                    )
+                    topic_model = BERTopic(language="multilingual", min_topic_size=min_size, nr_topics=n_topics_aprox,
+                                          vectorizer_model=vectorizer_model, calculate_probabilities=True, verbose=True)
                     
                     topics, probs = topic_model.fit_transform(docs, embeddings)
                     
@@ -469,7 +431,6 @@ if archivo and col_texto:
                         except: pass
                     
                     df['Cluster_ID'] = topics
-                    
                     freq = topic_model.get_topic_info()
                     freq_clean = freq[freq['Topic'] != -1].head(20)
                     freq_clean['Nombre_Tema'] = freq_clean['Name'].apply(lambda x: " ".join(x.split("_")[1:4]))
@@ -488,7 +449,7 @@ if archivo and col_texto:
                             fig_inter = topic_model.visualize_topics()
                             mostrar_y_guardar(fig_inter, "Cluster_Mapa_Intertopico")
                         except:
-                            st.info("Se necesitan más temas para generar el mapa.")
+                            st.info("Se necesitan más temas.")
 
                     st.markdown("---")
                     st.subheader("Palabras Clave por Grupo")
@@ -498,8 +459,7 @@ if archivo and col_texto:
                         topic_words = topic_model.get_topic(topic_id)
                         if topic_words:
                             keywords_dict = {word: score for word, score in topic_words}
-                            wc_cluster = WordCloud(width=400, height=250, background_color='white', 
-                                                 colormap='viridis').generate_from_frequencies(keywords_dict)
+                            wc_cluster = WordCloud(width=400, height=250, background_color='white', colormap='viridis').generate_from_frequencies(keywords_dict)
                             with cols_wc[i % 3]:
                                 st.markdown(f"**Grupo {topic_id}**")
                                 fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
@@ -507,7 +467,6 @@ if archivo and col_texto:
                                 ax_wc.axis('off')
                                 st.pyplot(fig_wc)
                                 plt.close()
-
                 except Exception as e:
                     st.error(f"Error: {e}")
 
@@ -571,7 +530,7 @@ if archivo and col_texto:
                 else:
                     st.warning("No se encontraron suficientes relaciones.")
 
-    # ---------------- TAB 7: MONITOR DE TENDENCIAS (VERSIÓN PRO) ----------------
+    # ---------------- TAB 7: MONITOR DE TENDENCIAS (SIN SLIDER) ----------------
     with tabs[6]:
         st.subheader(" Monitor de Tendencias y Agenda")
         
@@ -582,15 +541,12 @@ if archivo and col_texto:
                 df_time = df_time.dropna(subset=[col_fecha])
                 
                 if len(df_time) > 0:
-                    c_time_1, c_time_2 = st.columns([1, 3])
-                    with c_time_1:
-                        intervalo = st.select_slider("Agrupar por:", options=["D", "W", "M"], value="D")
+                    # Configuración Fija por defecto: DÍA
+                    intervalo = "D" 
                     
-                    st.markdown("---")
-                    
-                    # 1. RANKING DE ACTORES (BUMP CHART)
-                    st.subheader(" La Carrera de la Agenda")
-                    st.caption("Visualiza quién domina la conversación cada día.")
+                    # 1. RANKING DE ACTORES
+                    st.subheader(" Evolucion de la Agenda")
+                    st.caption("Visualiza quién domina la conversación.")
                     
                     tipo_tendencia = st.radio("Analizar:", ["Personas", "Organizaciones", "Temas (Clave)"], horizontal=True)
                     
@@ -617,14 +573,13 @@ if archivo and col_texto:
                             if not pivot_trend.empty:
                                 pivot_trend['Ranking'] = pivot_trend.groupby(col_fecha)['Menciones'].rank(method='first', ascending=False)
                                 
-                                # Gráfico de Ranking (Bump Chart)
+                                # Ranking (Bump Chart)
                                 fig_bump = px.line(pivot_trend, x=col_fecha, y='Ranking', color='Items', markers=True,
                                                   title=f"Ranking de {tipo_tendencia} (Top 6)", line_shape='spline')
                                 fig_bump.update_yaxes(autorange="reversed", dtick=1)
                                 mostrar_y_guardar(fig_bump, f"Ranking_{tipo_tendencia}")
                                 
-                                # Gráfico de Volumen Suave
-                                st.markdown("##### Volumen Estimado (Tendencia)")
+                                # Volumen Tendencia
                                 fig_line = px.line(pivot_trend, x=col_fecha, y='Menciones', color='Items',
                                                   title=f"Volumen de menciones", line_shape='spline')
                                 mostrar_y_guardar(fig_line, f"Volumen_Tendencia_{tipo_tendencia}")
@@ -637,7 +592,6 @@ if archivo and col_texto:
                         st.subheader(f" Matriz de Intensidad: {col_cat} vs Tiempo")
                         heatmap_data = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), col_cat]).size().reset_index(name='Cantidad')
                         
-                        # Filtro Top 15
                         top_fuentes = heatmap_data.groupby(col_cat)['Cantidad'].sum().nlargest(15).index.tolist()
                         heatmap_pivot = heatmap_data[heatmap_data[col_cat].isin(top_fuentes)].pivot(index=col_cat, columns=col_fecha, values='Cantidad').fillna(0)
                         heatmap_pivot = heatmap_pivot.reindex(top_fuentes)
@@ -664,4 +618,3 @@ if archivo and col_texto:
 
 else:
     st.info("Sube un archivo CSV para comenzar.")
-             
