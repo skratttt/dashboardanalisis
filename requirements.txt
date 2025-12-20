@@ -15,3 +15,4 @@ https://github.com/explosion/spacy-models/releases/download/es_core_news_sm-3.7.
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
 transformers
+kaleido==0.2.1
