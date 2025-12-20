@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.io as pio  # <--- NUEVO: Para configurar estilo global de graficos
+import plotly.io as pio
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 import spacy
@@ -19,7 +19,6 @@ import os
 # ==========================================
 # 0. CONFIGURACIÓN GLOBAL DE ESTILOS DE GRÁFICOS
 # ==========================================
-# Esto asegura que al descargar, el fondo sea BLANCO y no transparente
 pio.templates.default = "plotly_white"
 plt.rcParams['figure.facecolor'] = 'white'
 plt.rcParams['axes.facecolor'] = 'white'
@@ -34,7 +33,6 @@ st.markdown("""
     .block-container {padding-top: 2rem;}
     h1, h2, h3 {font-family: 'Sans-serif'; color: #202124;}
     
-    /* Forzar fondo blanco general por si falla el config.toml */
     .stApp {
         background-color: white;
     }
@@ -122,6 +120,7 @@ with st.sidebar:
     
     col_texto = None
     col_cat = None
+    col_fecha = None  # Inicializamos
     custom_stopwords = []
 
     if archivo:
@@ -143,17 +142,20 @@ with st.sidebar:
                 def limpiar_texto_duro(txt):
                     if not isinstance(txt, str): return str(txt)
                     t = txt.lower()
-                    # Unificar EE.UU y borrar basura
                     t = t.replace("ee.uu.", "eeuu").replace("ee.uu", "eeuu")
                     t = t.replace("ee. uu.", "eeuu").replace("ee. uu", "eeuu")
                     t = t.replace("&quot;", "").replace("quot", "")
                     return t
 
                 df[col_texto] = df[col_texto].apply(limpiar_texto_duro)
-            # ---------------------------
 
-            st.info("Opcional: Agrupador (ej: Medio, Fecha)")
+            st.info("Opcional: Agrupador (ej: Medio, Fuente)")
             col_cat = st.selectbox("3. Columna de AGRUPACIÓN", ["No aplicar"] + cols)
+            
+            # --- NUEVO: SELECTOR DE FECHA ---
+            st.info("Opcional: Análisis Temporal")
+            col_fecha = st.selectbox("4. Columna de FECHA", ["No aplicar"] + cols, 
+                                   help="Debe ser una columna con fechas (ej: 2023-10-25)")
 
             st.header("Filtros de Texto")
             stopwords_input = st.text_area("Palabras a ignorar (separadas por coma)", "el, la, los, un, una, de, del, y, o, que, por, para, con, se, su, noticia, tras, segun, hace, puede")
@@ -170,7 +172,8 @@ if archivo and col_texto:
     df[col_texto] = df[col_texto].astype(str)
     all_stopwords = get_stopwords(custom_stopwords)
 
-    tabs = st.tabs(["Resumen Global", "Analisis de Sentimiento", "Lenguaje Profundo", "Clusterizacion (Temas)", "Busqueda", "Redes"])
+    # AGREGAMOS LA NUEVA PESTAÑA AL FINAL DE LA LISTA
+    tabs = st.tabs(["Resumen Global", "Analisis de Sentimiento", "Lenguaje Profundo", "Clusterizacion (Temas)", "Busqueda", "Redes", "Evolución Temporal"])
 
     # ---------------- TAB 1: RESUMEN ----------------
     with tabs[0]:
@@ -180,24 +183,18 @@ if archivo and col_texto:
         if col_cat != "No aplicar":
             c2.metric(f"Total de {col_cat} únicos", df[col_cat].nunique())
             
-            # Preparamos los datos
             conteo = df[col_cat].value_counts().reset_index()
             conteo.columns = ['Categoria', 'Count']
             
-            # --- GRÁFICO CORREGIDO ---
             fig = px.bar(conteo.head(20), x='Count', y='Categoria', orientation='h', 
                          title=f"Distribución por {col_cat}", text_auto=True)
             
             fig.update_layout(
-                # 1. Ordenamos de mayor a menor (El más grande arriba)
                 yaxis={'categoryorder':'total ascending'},
-                # 2. ACTIVAMOS AUTOMARGIN (Esto arregla que no se lean los nombres largos)
                 yaxis_tickmode='linear',
-                margin=dict(l=10, r=10, t=50, b=10) # Damos aire, pero dejamos que automargin trabaje
+                margin=dict(l=10, r=10, t=50, b=10)
             )
-            # Forzamos explícitamente el ajuste de etiquetas
             fig.update_yaxes(automargin=True)
-            
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Selecciona una columna de agrupación para ver estadísticas.")
@@ -206,16 +203,12 @@ if archivo and col_texto:
     with tabs[1]:
         st.subheader("Clasificacion de Tono")
         
-        # 1. Chequeamos si ya existen resultados en memoria para este archivo
-        #    Usamos una clave única combinada con el nombre del archivo para resetear si cambias de CSV
         if 'sentimiento_data' not in st.session_state:
             st.session_state.sentimiento_data = None
         
-        # Botón para activar el proceso (Solo se muestra si NO hay datos en memoria)
         if st.session_state.sentimiento_data is None:
             if st.button("Ejecutar Modelo de Sentimiento", type="primary"):
                 with st.spinner("Procesando..."):
-                    # --- CÁLCULO (IGUAL QUE ANTES) ---
                     tok, mod = cargar_modelo_sentimiento()
                     
                     def predict(txts):
@@ -232,24 +225,18 @@ if archivo and col_texto:
                         res.extend(predict(txts[i:i+bs]))
                         prog.progress(min((i+bs)/len(txts), 1.0))
                     
-                    # --- AQUÍ ESTÁ EL TRUCO: GUARDAMOS EN MEMORIA ---
                     st.session_state.sentimiento_data = res
-                    st.rerun() # Recargamos forzosamente para que desaparezca el botón y aparezcan los gráficos
+                    st.rerun()
 
-        # 2. Si ya hay datos en memoria, mostramos los gráficos (PERSISTENCIA)
         if st.session_state.sentimiento_data is not None:
-            # Recuperamos los datos de la memoria
             df['Sentimiento'] = st.session_state.sentimiento_data
             
-            # Botón opcional para reiniciar si quieren correrlo de nuevo
             if st.button("🔄 Reiniciar Análisis", type="secondary"):
                 st.session_state.sentimiento_data = None
                 st.rerun()
 
-            # --- VISUALIZACIÓN (CÓDIGO ANTERIOR) ---
             c1, c2 = st.columns([1, 2])
             
-            # --- COLUMNA IZQUIERDA: TORTA GLOBAL ---
             with c1: 
                 st.markdown("##### Distribución Global")
                 st.plotly_chart(px.pie(df, names='Sentimiento', 
@@ -257,13 +244,10 @@ if archivo and col_texto:
                                 color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}), 
                                 use_container_width=True)
             
-            # --- COLUMNA DERECHA: BARRAS COMPARATIVAS ---
             with c2:
                 if col_cat != "No aplicar":
                     st.markdown(f"##### Comparativa por {col_cat}")
                     
-                    # A. SELECTOR DE FILTRO (TOP X)
-                    # Ahora al cambiar esto, Streamlit recarga, entra al 'if session_state is not None' y pinta todo bien
                     c_fil, _ = st.columns([1, 1])
                     with c_fil:
                         opcion_top = st.selectbox(
@@ -272,7 +256,6 @@ if archivo and col_texto:
                             index=2 
                         )
                     
-                    # B. LÓGICA DE FILTRADO
                     conteo_total = df[col_cat].value_counts()
                     
                     if opcion_top != "Todos":
@@ -282,14 +265,12 @@ if archivo and col_texto:
                     else:
                         df_f = df.copy()
 
-                    # C. PREPARACIÓN DE DATOS 
                     df_grouped = df_f.groupby([col_cat, 'Sentimiento']).size().reset_index(name='Conteo')
                     df_grouped['Porcentaje'] = df_grouped.groupby(col_cat)['Conteo'].transform(lambda x: 100 * x / x.sum())
                     
                     n_categorias = df_grouped[col_cat].nunique()
                     alto_grafico = max(350, n_categorias * 40) 
 
-                    # D. GRÁFICO 
                     fig = px.bar(
                         df_grouped, 
                         x="Porcentaje", 
@@ -312,7 +293,6 @@ if archivo and col_texto:
                     
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    # E. TABLA 
                     with st.expander("📊 Ver Tabla de Datos Exactos", expanded=True):
                         tabla = pd.crosstab(df_f[col_cat], df_f['Sentimiento'])
                         tabla['Total'] = tabla.sum(axis=1)
@@ -321,6 +301,7 @@ if archivo and col_texto:
 
                 else:
                     st.info(f"Selecciona una columna de agrupación en la barra lateral para ver el detalle por categoría.")
+
     # ---------------- TAB 3: LENGUAJE PROFUNDO ----------------
     with tabs[2]:
         if st.button("Ejecutar Analisis Completo de Lenguaje"):
@@ -329,7 +310,6 @@ if archivo and col_texto:
             
             st.subheader(" Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
-            # Matplotlib asegurando fondo blanco
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             ax.imshow(wc, interpolation='bilinear')
             ax.axis('off')
@@ -432,7 +412,7 @@ if archivo and col_texto:
                             new_topics = topic_model.reduce_outliers(docs, topics, strategy="embeddings", embeddings=embeddings)
                             topic_model.update_topics(docs, topics=new_topics, vectorizer_model=vectorizer_model)
                             topics = new_topics
-                            st.success("✅ Outliers reasignados exitosamente.")
+                            st.success(" Outliers reasignados exitosamente.")
                         except Exception as e:
                             pass
                     
@@ -475,7 +455,6 @@ if archivo and col_texto:
                             with cols_wc[i % 3]:
                                 name_clean = freq_clean[freq_clean['Topic']==topic_id]['Nombre_Tema'].values[0]
                                 st.markdown(f"**Grupo {topic_id}:** {name_clean}")
-                                # Matplotlib asegurando fondo blanco
                                 fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
                                 ax_wc.imshow(wc_cluster, interpolation='bilinear')
                                 ax_wc.axis('off')
@@ -562,9 +541,92 @@ if archivo and col_texto:
                 else:
                     st.warning("No se encontraron suficientes relaciones.")
 
+    # ---------------- TAB 7: EVOLUCIÓN TEMPORAL (NUEVA) ----------------
+    with tabs[6]:
+        st.subheader("⏳ Evolución de Noticias en el Tiempo")
+        
+        if col_fecha != "No aplicar":
+            # 1. PREPARACIÓN DE DATOS (Convertir fecha)
+            try:
+                df_time = df.copy()
+                df_time[col_fecha] = pd.to_datetime(df_time[col_fecha], errors='coerce')
+                
+                # Eliminamos fechas invalidas
+                df_time = df_time.dropna(subset=[col_fecha])
+                
+                if len(df_time) > 0:
+                    # Filtro de Intervalo
+                    c_time_1, c_time_2 = st.columns([1, 3])
+                    with c_time_1:
+                        intervalo = st.select_slider(
+                            "Agrupar por:", 
+                            options=["D", "W", "M", "Y"], 
+                            value="D", 
+                            format_func=lambda x: {"D":"Día", "W":"Semana", "M":"Mes", "Y":"Año"}[x]
+                        )
+                    
+                    st.markdown("---")
+
+                    # 2. GRÁFICO DE VOLUMEN
+                    st.markdown("##### Tendencia de Publicación (Volumen)")
+                    
+                    volumen = df_time.set_index(col_fecha).resample(intervalo).size().reset_index(name='Cantidad')
+                    
+                    fig_vol = px.line(
+                        volumen, 
+                        x=col_fecha, 
+                        y='Cantidad', 
+                        markers=True, 
+                        title="Cantidad de Noticias por Periodo",
+                        line_shape='spline',
+                        render_mode='svg'
+                    )
+                    fig_vol.update_layout(xaxis_title="Fecha", yaxis_title="N° Documentos")
+                    st.plotly_chart(fig_vol, use_container_width=True)
+
+                    # 3. SENTIMIENTO EN EL TIEMPO
+                    if 'Sentimiento' in df_time.columns:
+                        st.markdown("---")
+                        st.markdown("##### Evolución del Sentimiento")
+                        
+                        sent_time = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), 'Sentimiento']).size().reset_index(name='Conteo')
+                        
+                        fig_sent = px.area(
+                            sent_time, 
+                            x=col_fecha, 
+                            y='Conteo', 
+                            color='Sentimiento',
+                            color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'},
+                            title="Sentimiento Acumulado en el Tiempo"
+                        )
+                        st.plotly_chart(fig_sent, use_container_width=True)
+                    else:
+                        st.info("💡 Consejo: Ejecuta el 'Análisis de Sentimiento' en la Pestaña 2 para ver su evolución aquí.")
+
+                    # 4. HEATMAP (Si aplica)
+                    if col_cat != "No aplicar":
+                        st.markdown("---")
+                        st.markdown(f"#####  Mapa de Calor: {col_cat} vs Tiempo")
+                        st.caption("Intensidad de publicación por categoría en el tiempo.")
+                        
+                        heatmap_data = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), col_cat]).size().reset_index(name='Menciones')
+                        heatmap_pivot = heatmap_data.pivot(index=col_cat, columns=col_fecha, values='Menciones').fillna(0)
+                        
+                        fig_heat = px.imshow(
+                            heatmap_pivot, 
+                            aspect="auto", 
+                            color_continuous_scale="Viridis",
+                            origin='lower'
+                        )
+                        st.plotly_chart(fig_heat, use_container_width=True)
+
+                else:
+                    st.error(" No se encontraron fechas válidas. Revisa que el formato en tu CSV sea leíble (ej: YYYY-MM-DD).")
+            
+            except Exception as e:
+                st.error(f"Error procesando las fechas: {e}")
+        else:
+            st.warning("Por favor, selecciona una columna de **FECHA** en la barra lateral para activar este análisis.")
+
 else:
     st.info("Sube un archivo CSV para comenzar.")
-
-
-
-
