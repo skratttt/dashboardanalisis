@@ -111,28 +111,43 @@ def get_top_ngrams(corpus, n=2, top_k=10, stopwords=[]):
     words_freq = sorted(words_freq, key=lambda x: x[1], reverse=True)
     return pd.DataFrame(words_freq[:top_k], columns=['Frase', 'Frecuencia'])
 
-# ==========================================
-# 3. SIDEBAR Y CARGA DE DATOS
-# ==========================================
+#3
 with st.sidebar:
     st.header("Configuracion del Dataset")
     archivo = st.file_uploader("1. Subir Archivo (CSV)", type=["csv"])
     
     col_texto = None
     col_cat = None
-    col_fecha = None  # Inicializamos
+    col_fecha = None
     custom_stopwords = []
 
     if archivo:
         try:
-            df = pd.read_csv(archivo)
+            # --- LÓGICA DE DETECCIÓN INTELIGENTE DE SEPARADOR ---
+            try:
+                # 1. Intentamos leer con punto y coma (Tu caso actual)
+                df = pd.read_csv(archivo, sep=';')
+                
+                # Si pandas leyó todo en 1 sola columna, es probable que el separador fuera coma
+                if df.shape[1] < 2:
+                    archivo.seek(0) # "Rebobinamos" el archivo al principio
+                    df = pd.read_csv(archivo, sep=',')
+                    
+            except UnicodeDecodeError:
+                # 2. Si falla por tildes (error de encoding), probamos con 'latin-1'
+                archivo.seek(0)
+                df = pd.read_csv(archivo, sep=';', encoding='latin-1')
+            # ----------------------------------------------------
+
             st.success(f"Registros cargados: {len(df)}")
             cols = df.columns.tolist()
             
             idx_txt = 0
             for possible in ['texto', 'text', 'comentario', 'mensaje', 'descripcion', 'titulo']:
-                if possible in cols:
-                    idx_txt = cols.index(possible)
+                # Buscamos ignorando mayúsculas/minúsculas para ser más robustos
+                match = next((c for c in cols if possible.lower() == c.lower()), None)
+                if match:
+                    idx_txt = cols.index(match)
                     break
             
             col_texto = st.selectbox("2. Columna de TEXTO", cols, index=idx_txt)
@@ -152,7 +167,6 @@ with st.sidebar:
             st.info("Opcional: Agrupador (ej: Medio, Fuente)")
             col_cat = st.selectbox("3. Columna de AGRUPACIÓN", ["No aplicar"] + cols)
             
-            # --- NUEVO: SELECTOR DE FECHA ---
             st.info("Opcional: Análisis Temporal")
             col_fecha = st.selectbox("4. Columna de FECHA", ["No aplicar"] + cols, 
                                    help="Debe ser una columna con fechas (ej: 2023-10-25)")
@@ -161,12 +175,28 @@ with st.sidebar:
             stopwords_input = st.text_area("Palabras a ignorar (separadas por coma)", "el, la, los, un, una, de, del, y, o, que, por, para, con, se, su, noticia, tras, segun, hace, puede")
             custom_stopwords = [x.strip() for x in stopwords_input.split(",")]
             
+            # --- FILTROS GLOBALES Y EXPORTACIÓN ---
+            st.markdown("---")
+            st.header("🔍 Filtro Global")
+            filtro_palabra = st.text_input("Filtrar análisis por palabra clave:", placeholder="Ej: litio...")
+            
+            if filtro_palabra:
+                mask = df[col_texto].str.contains(filtro_palabra, case=False, na=False)
+                df = df[mask]
+                st.success(f"Filtrado: {len(df)} registros contienen '{filtro_palabra}'")
+
+            st.markdown("---")
+            def convert_df(dataframe):
+                return dataframe.to_csv(index=False).encode('utf-8')
+            csv = convert_df(df)
+            st.download_button("📥 Descargar CSV Procesado", data=csv, file_name='procesado.csv', mime='text/csv')
+            
         except Exception as e:
             st.error(f"Error al leer archivo: {e}")
 
 # ==========================================
 # 4. APLICACIÓN PRINCIPAL
-# ==========================================
+# ========================================
 if archivo and col_texto:
     df = df.dropna(subset=[col_texto])
     df[col_texto] = df[col_texto].astype(str)
