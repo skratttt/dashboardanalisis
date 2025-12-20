@@ -340,7 +340,7 @@ if archivo and col_texto:
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
             # 1. NUBE DE PALABRAS (Ya usaba stopwords, esto estaba bien)
-            st.subheader("☁️ Nube de Conceptos")
+            st.subheader(" Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
@@ -588,7 +588,7 @@ if archivo and col_texto:
 
     # ---------------- TAB 7: EVOLUCIÓN TEMPORAL (NUEVA) ----------------
     with tabs[6]:
-        st.subheader("⏳ Evolución de Noticias en el Tiempo")
+        st.subheader(" Evolución de Noticias en el Tiempo")
         
         if col_fecha != "No aplicar":
             # 1. PREPARACIÓN DE DATOS (Convertir fecha)
@@ -649,22 +649,62 @@ if archivo and col_texto:
                         st.info("💡 Consejo: Ejecuta el 'Análisis de Sentimiento' en la Pestaña 2 para ver su evolución aquí.")
 
                     # 4. HEATMAP (Si aplica)
+                    # ---------------------------------------------------------
+                    # 4. MATRIZ DE INTENSIDAD (HEATMAP MEJORADO)
+                    # ---------------------------------------------------------
                     if col_cat != "No aplicar":
                         st.markdown("---")
-                        st.markdown(f"#####  Mapa de Calor: {col_cat} vs Tiempo")
-                        st.caption("Intensidad de publicación por categoría en el tiempo.")
+                        st.subheader(f" Matriz de Intensidad: {col_cat} vs Tiempo")
+                        st.caption("Identifica patrones de publicación: ¿Qué medios concentran la agenda y cuándo?")
                         
-                        heatmap_data = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), col_cat]).size().reset_index(name='Menciones')
-                        heatmap_pivot = heatmap_data.pivot(index=col_cat, columns=col_fecha, values='Menciones').fillna(0)
+                        # A. PREPARACIÓN DE DATOS
+                        # Agrupamos por Fecha y Categoría (Fuente)
+                        heatmap_data = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), col_cat]).size().reset_index(name='Cantidad')
                         
+                        # B. FILTRO DE LOS "TOP PLAYERS"
+                        # Para que el gráfico sea legible, nos quedamos con los N principales
+                        n_top_heatmap = st.slider("Cantidad de fuentes a mostrar:", 5, 50, 15)
+                        
+                        # Calculamos el volumen total por fuente para ordenar
+                        top_fuentes = heatmap_data.groupby(col_cat)['Cantidad'].sum().nlargest(n_top_heatmap).index.tolist()
+                        
+                        # Filtramos la data para usar solo esos tops
+                        heatmap_data_filtered = heatmap_data[heatmap_data[col_cat].isin(top_fuentes)]
+                        
+                        # C. PIVOT (Transformar a Matriz)
+                        # Filas = Fuentes (Ordenadas por volumen), Columnas = Fechas
+                        heatmap_pivot = heatmap_data_filtered.pivot(index=col_cat, columns=col_fecha, values='Cantidad').fillna(0)
+                        
+                        # Reordenamos el índice para que los más activos salgan ARRIBA
+                        heatmap_pivot = heatmap_pivot.reindex(top_fuentes)
+                        
+                        # D. VISUALIZACIÓN PROFESIONAL
                         fig_heat = px.imshow(
                             heatmap_pivot, 
                             aspect="auto", 
-                            color_continuous_scale="Viridis",
-                            origin='lower'
+                            color_continuous_scale="Reds", # Escala de rojos (clásica de intensidad)
+                            text_auto=True if len(heatmap_pivot.columns) < 30 else False, # Muestra números si hay pocas columnas
+                            labels=dict(x="Fecha", y=col_cat, color="Noticias"),
+                            title=f"Concentración de Publicaciones (Top {n_top_heatmap})"
                         )
+                        
+                        fig_heat.update_layout(
+                            # Separación entre cuadritos para limpieza visual
+                            xaxis_nticks=20,
+                            yaxis_nticks=len(top_fuentes)
+                        )
+                        # Truco visual: Bordes blancos entre celdas para que parezca tabla
+                        fig_heat.update_traces(xgap=1, ygap=1)
+                        
                         st.plotly_chart(fig_heat, use_container_width=True)
-
+                        
+                        # E. HALLAZGOS AUTOMÁTICOS (El "insumo" extra)
+                        with st.expander("Ver Hallazgos de la Matriz"):
+                            dia_max = heatmap_data_filtered.loc[heatmap_data_filtered['Cantidad'].idxmax()]
+                            st.markdown(f"""
+                            * **Pico Máximo:** El medio **{dia_max[col_cat]}** tuvo su mayor actividad el **{dia_max[col_fecha].strftime('%d-%m-%Y')}** con **{dia_max['Cantidad']}** noticias.
+                            * **Fuente Dominante:** **{top_fuentes[0]}** es la fuente con mayor volumen acumulado en el periodo.
+                            """)
                 else:
                     st.error(" No se encontraron fechas válidas. Revisa que el formato en tu CSV sea leíble (ej: YYYY-MM-DD).")
             
