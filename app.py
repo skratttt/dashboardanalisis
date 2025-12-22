@@ -98,13 +98,14 @@ st.markdown("Suite de analisis de Sentimiento, Entidades, N-Gramas, Temas y Rede
 @st.cache_resource
 def cargar_spacy():
     try: 
-        # Intentamos cargar el modelo GRANDE (Large) que es mucho más preciso
-        return spacy.load("es_core_news_lg")
+        # Intentamos cargar el modelo MEDIUM (Equilibrio perfecto)
+        return spacy.load("es_core_news_md")
     except: 
         try:
             # Si falla, intentamos el pequeño (backup)
             return spacy.load("es_core_news_sm")
         except: return None
+
 @st.cache_resource
 def cargar_modelo_sentimiento():
     nombre = "VerificadoProfesional/SaBERT-Spanish-Sentiment-Analysis"
@@ -200,14 +201,14 @@ with st.sidebar:
                 st.success(f"Filtrado: {len(df)} registros contienen '{filtro_palabra}'")
             
             st.markdown("---")
-            st.header(" Descarga De recursos")
+            st.header("📦 Descarga Masiva")
             
             if st.button("Generar Reporte Visual (ZIP)"):
                 graficos = st.session_state.figures_to_export
                 if not graficos:
-                    st.warning("No hay gráficos en memoria. Navega por las pestañas para generarlos primero.")
+                    st.warning("⚠️ No hay gráficos en memoria. Navega por las pestañas para generarlos primero.")
                 else:
-                    with st.spinner(f"Procesando {len(graficos)} gráficos..."):
+                    with st.spinner(f"📸 Procesando {len(graficos)} gráficos..."):
                         try:
                             zip_buffer = io.BytesIO()
                             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -216,7 +217,7 @@ with st.sidebar:
                                     zf.writestr(f"{nombre}.png", img_bytes)
                             
                             st.download_button(
-                                label=f"Descargar ZIP ({len(graficos)} gráficos)",
+                                label=f"📥 Descargar ZIP ({len(graficos)} gráficos)",
                                 data=zip_buffer.getvalue(),
                                 file_name="reporte_graficos.zip",
                                 mime="application/zip"
@@ -332,7 +333,7 @@ if archivo and col_texto:
                     fig_bar.update_traces(textposition='inside', textfont_color='white')
                     mostrar_y_guardar(fig_bar, f"Sentimiento_Detalle_{col_cat}")
                     
-                    with st.expander(" Ver Tabla de Datos Exactos", expanded=True):
+                    with st.expander("📊 Ver Tabla de Datos Exactos", expanded=True):
                         tabla = pd.crosstab(df_f[col_cat], df_f['Sentimiento'])
                         tabla['Total'] = tabla.sum(axis=1)
                         tabla = tabla.sort_values('Total', ascending=False)
@@ -340,7 +341,6 @@ if archivo and col_texto:
                 else:
                     st.info(f"Selecciona una columna de agrupación en la barra lateral.")
 
-    # ---------------- TAB 3: LENGUAJE PROFUNDO ----------------
     # ---------------- TAB 3: LENGUAJE PROFUNDO (NER MEJORADO) ----------------
     with tabs[2]:
         if st.button("Ejecutar Análisis Completo de Lenguaje"):
@@ -349,11 +349,12 @@ if archivo and col_texto:
             # Unimos texto
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            # 1. NUBE DE PALABRAS (Sin cambios)
-            st.subheader("Nube de Conceptos")
+            # 1. NUBE DE PALABRAS (CORREGIDA)
+            st.subheader("☁️ Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
-            ax.imshow(wc, interpolation='bilinear')
+            # --- ARREGLO AQUÍ: .to_array() ---
+            ax.imshow(wc.to_array(), interpolation='bilinear')
             ax.axis('off')
             st.pyplot(fig)
             plt.close()
@@ -361,7 +362,7 @@ if archivo and col_texto:
             st.markdown("---")
             
             # 2. DETECCIÓN DE ENTIDADES (NER) - VERSIÓN MEJORADA
-            st.subheader(" Detección de Entidades (NER)")
+            st.subheader("Detección de Entidades (NER)")
             
             with st.spinner("Analizando gramática y entidades..."):
                 doc = nlp(full_text)
@@ -369,23 +370,11 @@ if archivo and col_texto:
                 # --- FUNCIÓN DE FILTRADO INTELIGENTE ---
                 def es_entidad_valida(entidad):
                     txt = entidad.text.lower().strip()
-                    
-                    # 1. Filtro de Stopwords y longitud
-                    if txt in all_stopwords or len(txt) < 3:
-                        return False
-                        
-                    # 2. Filtro de basura específica (tu caso de "presidente(a")
-                    if "(" in txt or ")" in txt or "http" in txt or "%" in txt:
-                        return False
-                        
-                    # 3. FILTRO GRAMATICAL (POS Tagging)
-                    # Si la entidad es solo UN verbo, adverbio o número, es un error del modelo.
-                    # Ejemplo: "Incorporó" (VERB) -> Falso positivo común.
-                    if len(entidad) == 1: # Si es una sola palabra
+                    if txt in all_stopwords or len(txt) < 3: return False
+                    if "(" in txt or ")" in txt or "http" in txt or "%" in txt: return False
+                    if len(entidad) == 1: 
                         pos = entidad[0].pos_
-                        if pos in ["VERB", "ADV", "ADJ", "NUM", "AUX", "SCONJ", "DET"]:
-                            return False
-                            
+                        if pos in ["VERB", "ADV", "ADJ", "NUM", "AUX", "SCONJ", "DET"]: return False
                     return True
                 # ----------------------------------------
 
@@ -395,20 +384,15 @@ if archivo and col_texto:
                 
                 for e in doc.ents:
                     if es_entidad_valida(e):
-                        if e.label_ == "PER":
-                            per.append(e.text)
-                        elif e.label_ in ["ORG", "MISC"]:
-                            org.append(e.text)
-                        elif e.label_ in ["LOC", "GPE"]:
-                            loc.append(e.text)
+                        if e.label_ == "PER": per.append(e.text)
+                        elif e.label_ in ["ORG", "MISC"]: org.append(e.text)
+                        elif e.label_ in ["LOC", "GPE"]: loc.append(e.text)
 
             def plot_entity(lista, titulo, color):
                 if lista:
-                    # Limpiamos duplicados exactos y contamos
                     counts = pd.Series(lista).value_counts().head(10).sort_values()
                     if not counts.empty:
-                        fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, 
-                                     color_discrete_sequence=[color])
+                        fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, color_discrete_sequence=[color])
                         fig.update_layout(showlegend=False, height=450, margin=dict(l=150))
                         fig.update_yaxes(automargin=True)
                         return fig
@@ -418,7 +402,7 @@ if archivo and col_texto:
             with col_a: 
                 fig_per = plot_entity(per, "Top Personas", "#4285F4")
                 if fig_per: mostrar_y_guardar(fig_per, "Entidades_Personas")
-                else: st.info("Sin Personas detectadas (Revisa si el modelo lg está cargado)")
+                else: st.info("Sin Personas detectadas")
 
             with col_b: 
                 fig_org = plot_entity(org, "Top Organizaciones", "#EA4335")
@@ -431,10 +415,9 @@ if archivo and col_texto:
 
             st.markdown("---")
             
-            # 3. N-GRAMAS (Sin cambios)
-            st.subheader(" Frases Recurrentes (N-Gramas)")
+            # 3. N-GRAMAS
+            st.subheader("Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
-            
             with c_bi:
                 try:
                     df_bi = get_top_ngrams(df[col_texto], n=2, top_k=10, stopwords=all_stopwords)
@@ -442,7 +425,6 @@ if archivo and col_texto:
                     fig_bi.update_layout(yaxis={'categoryorder':'total ascending'})
                     mostrar_y_guardar(fig_bi, "Bigramas")
                 except: st.warning("No hay suficientes datos")
-
             with c_tri:
                 try:
                     df_tri = get_top_ngrams(df[col_texto], n=3, top_k=10, stopwords=all_stopwords)
@@ -515,7 +497,7 @@ if archivo and col_texto:
                             with cols_wc[i % 3]:
                                 st.markdown(f"**Grupo {topic_id}**")
                                 fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
-                                ax_wc.imshow(wc_cluster, interpolation='bilinear')
+                                ax_wc.imshow(wc_cluster.to_array(), interpolation='bilinear')
                                 ax_wc.axis('off')
                                 st.pyplot(fig_wc)
                                 plt.close()
@@ -597,7 +579,7 @@ if archivo and col_texto:
                     intervalo = "D" 
                     
                     # 1. RANKING DE ACTORES
-                    st.subheader(" Evolucion de la Agenda")
+                    st.subheader("tendencia de la agenda")
                     st.caption("Visualiza quién domina la conversación.")
                     
                     tipo_tendencia = st.radio("Analizar:", ["Personas", "Organizaciones", "Temas (Clave)"], horizontal=True)
