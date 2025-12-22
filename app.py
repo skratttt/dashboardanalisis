@@ -349,20 +349,22 @@ if archivo and col_texto:
             # Unimos texto
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            # 1. NUBE DE PALABRAS (CORREGIDA)
+            # 1. NUBE DE PALABRAS (CORREGIDA - SOLUCIÓN NUMPY)
             st.subheader("☁️ Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
-            # --- ARREGLO AQUÍ: .to_array() ---
-            ax.imshow(wc.to_array(), interpolation='bilinear')
+            
+            # --- CORRECCIÓN AQUÍ: Usamos .to_image() en lugar de .to_array() ---
+            ax.imshow(wc.to_image(), interpolation='bilinear')
+            
             ax.axis('off')
             st.pyplot(fig)
             plt.close()
 
             st.markdown("---")
             
-            # 2. DETECCIÓN DE ENTIDADES (NER) - VERSIÓN MEJORADA
-            st.subheader("Detección de Entidades (NER)")
+            # 2. DETECCIÓN DE ENTIDADES (NER)
+            st.subheader("🕵️ Detección de Entidades (NER)")
             
             with st.spinner("Analizando gramática y entidades..."):
                 doc = nlp(full_text)
@@ -416,7 +418,7 @@ if archivo and col_texto:
             st.markdown("---")
             
             # 3. N-GRAMAS
-            st.subheader("Frases Recurrentes (N-Gramas)")
+            st.subheader("🔠 Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             with c_bi:
                 try:
