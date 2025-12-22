@@ -349,21 +349,20 @@ if archivo and col_texto:
             # Unimos texto
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            # 1. NUBE DE PALABRAS (CORREGIDA - SOLUCIÓN NUMPY)
+            # 1. NUBE DE PALABRAS (CORREGIDA - SOLUCIÓN DEFINITIVA)
             st.subheader("☁️ Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             
-            # --- CORRECCIÓN AQUÍ: Usamos .to_image() en lugar de .to_array() ---
+            # --- CORRECCIÓN AQUÍ: .to_image() funciona con NumPy nuevo ---
             ax.imshow(wc.to_image(), interpolation='bilinear')
-            
             ax.axis('off')
             st.pyplot(fig)
             plt.close()
 
             st.markdown("---")
             
-            # 2. DETECCIÓN DE ENTIDADES (NER)
+            # 2. DETECCIÓN DE ENTIDADES (NER) - VERSIÓN MEJORADA
             st.subheader("🕵️ Detección de Entidades (NER)")
             
             with st.spinner("Analizando gramática y entidades..."):
@@ -499,7 +498,8 @@ if archivo and col_texto:
                             with cols_wc[i % 3]:
                                 st.markdown(f"**Grupo {topic_id}**")
                                 fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
-                                ax_wc.imshow(wc_cluster.to_array(), interpolation='bilinear')
+                                # --- CORRECCIÓN AQUÍ TAMBIÉN: .to_image() ---
+                                ax_wc.imshow(wc_cluster.to_image(), interpolation='bilinear')
                                 ax_wc.axis('off')
                                 st.pyplot(fig_wc)
                                 plt.close()
@@ -568,7 +568,7 @@ if archivo and col_texto:
 
     # ---------------- TAB 7: MONITOR DE TENDENCIAS (SIN SLIDER) ----------------
     with tabs[6]:
-        st.subheader(" Monitor de Tendencias y Agenda")
+        st.subheader("⏳ Monitor de Tendencias y Agenda")
         
         if col_fecha != "No aplicar":
             try:
@@ -581,7 +581,7 @@ if archivo and col_texto:
                     intervalo = "D" 
                     
                     # 1. RANKING DE ACTORES
-                    st.subheader("tendencia de la agenda")
+                    st.subheader("🏆 La Carrera de la Agenda")
                     st.caption("Visualiza quién domina la conversación.")
                     
                     tipo_tendencia = st.radio("Analizar:", ["Personas", "Organizaciones", "Temas (Clave)"], horizontal=True)
@@ -625,7 +625,7 @@ if archivo and col_texto:
                     # 2. MATRIZ DE CALOR
                     if col_cat != "No aplicar":
                         st.markdown("---")
-                        st.subheader(f" Matriz de Intensidad: {col_cat} vs Tiempo")
+                        st.subheader(f"🔥 Matriz de Intensidad: {col_cat} vs Tiempo")
                         heatmap_data = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), col_cat]).size().reset_index(name='Cantidad')
                         
                         top_fuentes = heatmap_data.groupby(col_cat)['Cantidad'].sum().nlargest(15).index.tolist()
