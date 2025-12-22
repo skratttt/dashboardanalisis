@@ -1,7 +1,7 @@
 streamlit
 pandas
 numpy<2
-spacy
+https://github.com/explosion/spacy-models/releases/download/es_core_news_lg-3.5.0/es_core_news_lg-3.5.0.tar.gz#egg=es_core_news_lg
 matplotlib
 seaborn
 scikit-learn
