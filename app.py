@@ -16,7 +16,8 @@ import streamlit.components.v1 as components
 import tempfile
 import os
 import zipfile 
-import io      
+import io
+import numpy as np # <--- 1. IMPORTAMOS NUMPY AQUÍ
 
 # ==========================================
 # 0. CONFIGURACIÓN GLOBAL Y RECOLECTOR
@@ -98,11 +99,9 @@ st.markdown("Suite de analisis de Sentimiento, Entidades, N-Gramas, Temas y Rede
 @st.cache_resource
 def cargar_spacy():
     try: 
-        # Intentamos cargar el modelo MEDIUM (Equilibrio perfecto)
         return spacy.load("es_core_news_md")
     except: 
         try:
-            # Si falla, intentamos el pequeño (backup)
             return spacy.load("es_core_news_sm")
         except: return None
 
@@ -140,7 +139,6 @@ with st.sidebar:
     custom_stopwords = []
 
     if archivo:
-        # Limpieza de memoria al cambiar archivo
         file_id = f"{archivo.name}-{archivo.size}"
         if 'last_file_id' not in st.session_state or st.session_state.last_file_id != file_id:
             st.session_state.figures_to_export = {}
@@ -349,20 +347,23 @@ if archivo and col_texto:
             # Unimos texto
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            # 1. NUBE DE PALABRAS (CORREGIDA - SOLUCIÓN DEFINITIVA)
+            # 1. NUBE DE PALABRAS (MANUAL NUMPY ARRAY)
             st.subheader("☁️ Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             
-            # --- CORRECCIÓN AQUÍ: .to_image() funciona con NumPy nuevo ---
-            ax.imshow(wc.to_image(), interpolation='bilinear')
+            # --- ARREGLO FUERZA BRUTA ---
+            # Convertimos a imagen y luego manualmente a array de numpy
+            # Esto evita que wordcloud intente usar el parámetro 'copy'
+            ax.imshow(np.array(wc.to_image()), interpolation='bilinear')
+            
             ax.axis('off')
             st.pyplot(fig)
             plt.close()
 
             st.markdown("---")
             
-            # 2. DETECCIÓN DE ENTIDADES (NER) - VERSIÓN MEJORADA
+            # 2. DETECCIÓN DE ENTIDADES (NER)
             st.subheader("🕵️ Detección de Entidades (NER)")
             
             with st.spinner("Analizando gramática y entidades..."):
@@ -498,8 +499,10 @@ if archivo and col_texto:
                             with cols_wc[i % 3]:
                                 st.markdown(f"**Grupo {topic_id}**")
                                 fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
-                                # --- CORRECCIÓN AQUÍ TAMBIÉN: .to_image() ---
-                                ax_wc.imshow(wc_cluster.to_image(), interpolation='bilinear')
+                                
+                                # --- ARREGLO FUERZA BRUTA 2 ---
+                                ax_wc.imshow(np.array(wc_cluster.to_image()), interpolation='bilinear')
+                                
                                 ax_wc.axis('off')
                                 st.pyplot(fig_wc)
                                 plt.close()
@@ -566,7 +569,7 @@ if archivo and col_texto:
                 else:
                     st.warning("No se encontraron suficientes relaciones.")
 
-    # ---------------- TAB 7: MONITOR DE TENDENCIAS (SIN SLIDER) ----------------
+    # ---------------- TAB 7: MONITOR DE TENDENCIAS ----------------
     with tabs[6]:
         st.subheader("⏳ Monitor de Tendencias y Agenda")
         
