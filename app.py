@@ -97,9 +97,14 @@ st.markdown("Suite de analisis de Sentimiento, Entidades, N-Gramas, Temas y Rede
 # ==========================================
 @st.cache_resource
 def cargar_spacy():
-    try: return spacy.load("es_core_news_sm")
-    except: return None
-
+    try: 
+        # Intentamos cargar el modelo GRANDE (Large) que es mucho más preciso
+        return spacy.load("es_core_news_lg")
+    except: 
+        try:
+            # Si falla, intentamos el pequeño (backup)
+            return spacy.load("es_core_news_sm")
+        except: return None
 @st.cache_resource
 def cargar_modelo_sentimiento():
     nombre = "VerificadoProfesional/SaBERT-Spanish-Sentiment-Analysis"
@@ -327,7 +332,7 @@ if archivo and col_texto:
                     fig_bar.update_traces(textposition='inside', textfont_color='white')
                     mostrar_y_guardar(fig_bar, f"Sentimiento_Detalle_{col_cat}")
                     
-                    with st.expander("📊 Ver Tabla de Datos Exactos", expanded=True):
+                    with st.expander(" Ver Tabla de Datos Exactos", expanded=True):
                         tabla = pd.crosstab(df_f[col_cat], df_f['Sentimiento'])
                         tabla['Total'] = tabla.sum(axis=1)
                         tabla = tabla.sort_values('Total', ascending=False)
@@ -336,54 +341,100 @@ if archivo and col_texto:
                     st.info(f"Selecciona una columna de agrupación en la barra lateral.")
 
     # ---------------- TAB 3: LENGUAJE PROFUNDO ----------------
+    # ---------------- TAB 3: LENGUAJE PROFUNDO (NER MEJORADO) ----------------
     with tabs[2]:
-        if st.button("Ejecutar Analisis Completo de Lenguaje"):
+        if st.button("Ejecutar Análisis Completo de Lenguaje"):
             nlp = cargar_spacy()
+            
+            # Unimos texto
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            st.subheader(" Nube de Conceptos")
+            # 1. NUBE DE PALABRAS (Sin cambios)
+            st.subheader("Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             ax.imshow(wc, interpolation='bilinear')
             ax.axis('off')
-            st.pyplot(fig) 
+            st.pyplot(fig)
             plt.close()
 
             st.markdown("---")
-            st.subheader("Deteccion de Entidades (NER)")
-            doc = nlp(full_text)
             
-            per = [e.text for e in doc.ents if e.label_ == "PER" and len(e.text)>3 and e.text.lower() not in all_stopwords]
-            org = [e.text for e in doc.ents if e.label_ in ["ORG", "MISC"] and len(e.text)>2 and e.text.lower() not in all_stopwords]
-            loc = [e.text for e in doc.ents if e.label_ in ["LOC", "GPE"] and len(e.text)>2 and e.text.lower() not in all_stopwords]
+            # 2. DETECCIÓN DE ENTIDADES (NER) - VERSIÓN MEJORADA
+            st.subheader(" Detección de Entidades (NER)")
+            
+            with st.spinner("Analizando gramática y entidades..."):
+                doc = nlp(full_text)
+                
+                # --- FUNCIÓN DE FILTRADO INTELIGENTE ---
+                def es_entidad_valida(entidad):
+                    txt = entidad.text.lower().strip()
+                    
+                    # 1. Filtro de Stopwords y longitud
+                    if txt in all_stopwords or len(txt) < 3:
+                        return False
+                        
+                    # 2. Filtro de basura específica (tu caso de "presidente(a")
+                    if "(" in txt or ")" in txt or "http" in txt or "%" in txt:
+                        return False
+                        
+                    # 3. FILTRO GRAMATICAL (POS Tagging)
+                    # Si la entidad es solo UN verbo, adverbio o número, es un error del modelo.
+                    # Ejemplo: "Incorporó" (VERB) -> Falso positivo común.
+                    if len(entidad) == 1: # Si es una sola palabra
+                        pos = entidad[0].pos_
+                        if pos in ["VERB", "ADV", "ADJ", "NUM", "AUX", "SCONJ", "DET"]:
+                            return False
+                            
+                    return True
+                # ----------------------------------------
+
+                per = []
+                org = []
+                loc = []
+                
+                for e in doc.ents:
+                    if es_entidad_valida(e):
+                        if e.label_ == "PER":
+                            per.append(e.text)
+                        elif e.label_ in ["ORG", "MISC"]:
+                            org.append(e.text)
+                        elif e.label_ in ["LOC", "GPE"]:
+                            loc.append(e.text)
 
             def plot_entity(lista, titulo, color):
                 if lista:
+                    # Limpiamos duplicados exactos y contamos
                     counts = pd.Series(lista).value_counts().head(10).sort_values()
-                    fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, color_discrete_sequence=[color])
-                    fig.update_layout(showlegend=False, height=450, margin=dict(l=150))
-                    fig.update_yaxes(automargin=True)
-                    return fig
+                    if not counts.empty:
+                        fig = px.bar(x=counts.values, y=counts.index, orientation='h', title=titulo, 
+                                     color_discrete_sequence=[color])
+                        fig.update_layout(showlegend=False, height=450, margin=dict(l=150))
+                        fig.update_yaxes(automargin=True)
+                        return fig
                 return None
 
             col_a, col_b = st.columns(2)
             with col_a: 
                 fig_per = plot_entity(per, "Top Personas", "#4285F4")
                 if fig_per: mostrar_y_guardar(fig_per, "Entidades_Personas")
-                else: st.info("Sin Personas")
+                else: st.info("Sin Personas detectadas (Revisa si el modelo lg está cargado)")
 
             with col_b: 
                 fig_org = plot_entity(org, "Top Organizaciones", "#EA4335")
                 if fig_org: mostrar_y_guardar(fig_org, "Entidades_Organizaciones")
-                else: st.info("Sin Organizaciones")
+                else: st.info("Sin Organizaciones detectadas")
 
             fig_loc = plot_entity(loc, "Top Lugares", "#34A853")
             if fig_loc: mostrar_y_guardar(fig_loc, "Entidades_Lugares")
-            else: st.info("Sin Lugares")
+            else: st.info("Sin Lugares detectados")
 
             st.markdown("---")
-            st.subheader("Frases Recurrentes (N-Gramas)")
+            
+            # 3. N-GRAMAS (Sin cambios)
+            st.subheader(" Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
+            
             with c_bi:
                 try:
                     df_bi = get_top_ngrams(df[col_texto], n=2, top_k=10, stopwords=all_stopwords)
@@ -391,6 +442,7 @@ if archivo and col_texto:
                     fig_bi.update_layout(yaxis={'categoryorder':'total ascending'})
                     mostrar_y_guardar(fig_bi, "Bigramas")
                 except: st.warning("No hay suficientes datos")
+
             with c_tri:
                 try:
                     df_tri = get_top_ngrams(df[col_texto], n=3, top_k=10, stopwords=all_stopwords)
