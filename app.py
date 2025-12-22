@@ -338,7 +338,7 @@ if archivo and col_texto:
                 else:
                     st.info(f"Selecciona una columna de agrupación en la barra lateral.")
 
-    # ---------------- TAB 3: LENGUAJE PROFUNDO (NER MEJORADO) ----------------
+    # ---------------- TAB 3: LENGUAJE PROFUNDO (NER CON BLACKLIST) ----------------
     with tabs[2]:
         if st.button("Ejecutar Análisis Completo de Lenguaje"):
             nlp = cargar_spacy()
@@ -351,9 +351,7 @@ if archivo and col_texto:
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             
-            # === CORRECCIÓN DEFINITIVA ===
-            # Usamos .to_image() para pasarle la imagen DIRECTA a matplotlib.
-            # No usamos .to_array() ni numpy porque dan error de versión.
+            # Usamos .to_image() para arreglar el error de numpy
             ax.imshow(wc.to_image(), interpolation='bilinear')
             
             ax.axis('off')
@@ -368,16 +366,38 @@ if archivo and col_texto:
             with st.spinner("Analizando gramática y entidades..."):
                 doc = nlp(full_text)
                 
-                # --- FUNCIÓN DE FILTRADO INTELIGENTE ---
+                # --- FUNCIÓN DE FILTRADO INTELIGENTE (CON LISTA NEGRA) ---
                 def es_entidad_valida(entidad):
                     txt = entidad.text.lower().strip()
+                    
+                    # A. FILTRO BÁSICO
                     if txt in all_stopwords or len(txt) < 3: return False
+                    
+                    # B. LISTA NEGRA: Palabras que el modelo confunde con Personas
+                    blacklist = [
+                        "magallanes", "ddhh", "chile", "biobio", "coquimbo", "araucania", 
+                        "valparaiso", "santiago", "region", "pais", "nacional", "gobierno",
+                        "estado", "municipalidad", "ministerio", "fiscalia", "carabineros",
+                        "pdi", "senado", "diputados", "camara", "comision", "oficina",
+                        "servicio", "direccion", "departamento", "unidad", "centro",
+                        "hospital", "universidad", "escuela", "colegio", "liceo",
+                        "presidente", "ministro", "alcalde", "gobernador", "diputado", 
+                        "senador", "concejal", "director", "jefe", "gerente", "seremi"
+                    ]
+                    
+                    # Verificamos si la entidad (o parte de ella) está en la lista negra
+                    if txt in blacklist: return False
+                    
+                    # C. FILTRO DE BASURA
                     if "(" in txt or ")" in txt or "http" in txt or "%" in txt: return False
+                    
+                    # D. FILTRO GRAMATICAL
                     if len(entidad) == 1: 
                         pos = entidad[0].pos_
                         if pos in ["VERB", "ADV", "ADJ", "NUM", "AUX", "SCONJ", "DET"]: return False
+                        
                     return True
-                # ----------------------------------------
+                # -------------------------------------------------------------
 
                 per = []
                 org = []
@@ -499,7 +519,7 @@ if archivo and col_texto:
                                 st.markdown(f"**Grupo {topic_id}**")
                                 fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
                                 
-                                # === CORRECCIÓN AQUÍ TAMBIÉN ===
+                                # Usamos .to_image() para arreglar el error de numpy
                                 ax_wc.imshow(wc_cluster.to_image(), interpolation='bilinear')
                                 
                                 ax_wc.axis('off')
