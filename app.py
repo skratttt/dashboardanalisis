@@ -17,7 +17,6 @@ import tempfile
 import os
 import zipfile 
 import io
-import numpy as np # <--- 1. IMPORTAMOS NUMPY AQUÍ
 
 # ==========================================
 # 0. CONFIGURACIÓN GLOBAL Y RECOLECTOR
@@ -347,15 +346,15 @@ if archivo and col_texto:
             # Unimos texto
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            # 1. NUBE DE PALABRAS (MANUAL NUMPY ARRAY)
+            # 1. NUBE DE PALABRAS
             st.subheader("☁️ Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             
-            # --- ARREGLO FUERZA BRUTA ---
-            # Convertimos a imagen y luego manualmente a array de numpy
-            # Esto evita que wordcloud intente usar el parámetro 'copy'
-            ax.imshow(np.array(wc.to_image()), interpolation='bilinear')
+            # === CORRECCIÓN DEFINITIVA ===
+            # Usamos .to_image() para pasarle la imagen DIRECTA a matplotlib.
+            # No usamos .to_array() ni numpy porque dan error de versión.
+            ax.imshow(wc.to_image(), interpolation='bilinear')
             
             ax.axis('off')
             st.pyplot(fig)
@@ -500,8 +499,8 @@ if archivo and col_texto:
                                 st.markdown(f"**Grupo {topic_id}**")
                                 fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
                                 
-                                # --- ARREGLO FUERZA BRUTA 2 ---
-                                ax_wc.imshow(np.array(wc_cluster.to_image()), interpolation='bilinear')
+                                # === CORRECCIÓN AQUÍ TAMBIÉN ===
+                                ax_wc.imshow(wc_cluster.to_image(), interpolation='bilinear')
                                 
                                 ax_wc.axis('off')
                                 st.pyplot(fig_wc)
