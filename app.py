@@ -189,7 +189,7 @@ with st.sidebar:
             custom_stopwords = [x.strip().lower() for x in stopwords_input.split(",")]
             
             st.markdown("---")
-            st.header("🔍 Filtro Global")
+            st.header(" Filtro Global")
             filtro_palabra = st.text_input("Filtrar análisis por palabra clave:", placeholder="Ej: litio...")
             
             if filtro_palabra:
@@ -198,14 +198,14 @@ with st.sidebar:
                 st.success(f"Filtrado: {len(df)} registros contienen '{filtro_palabra}'")
             
             st.markdown("---")
-            st.header("📦 Descarga Masiva")
+            st.header(" Descarga Masiva")
             
             if st.button("Generar Reporte Visual (ZIP)"):
                 graficos = st.session_state.figures_to_export
                 if not graficos:
-                    st.warning("⚠️ No hay gráficos en memoria. Navega por las pestañas para generarlos primero.")
+                    st.warning(" No hay gráficos en memoria. Navega por las pestañas para generarlos primero.")
                 else:
-                    with st.spinner(f"📸 Procesando {len(graficos)} gráficos..."):
+                    with st.spinner(f" Procesando {len(graficos)} gráficos..."):
                         try:
                             zip_buffer = io.BytesIO()
                             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -214,7 +214,7 @@ with st.sidebar:
                                     zf.writestr(f"{nombre}.png", img_bytes)
                             
                             st.download_button(
-                                label=f"📥 Descargar ZIP ({len(graficos)} gráficos)",
+                                label=f"Descargar ZIP ({len(graficos)} gráficos)",
                                 data=zip_buffer.getvalue(),
                                 file_name="reporte_graficos.zip",
                                 mime="application/zip"
@@ -330,7 +330,7 @@ if archivo and col_texto:
                     fig_bar.update_traces(textposition='inside', textfont_color='white')
                     mostrar_y_guardar(fig_bar, f"Sentimiento_Detalle_{col_cat}")
                     
-                    with st.expander("📊 Ver Tabla de Datos Exactos", expanded=True):
+                    with st.expander(" Ver Tabla de Datos Exactos", expanded=True):
                         tabla = pd.crosstab(df_f[col_cat], df_f['Sentimiento'])
                         tabla['Total'] = tabla.sum(axis=1)
                         tabla = tabla.sort_values('Total', ascending=False)
@@ -347,7 +347,7 @@ if archivo and col_texto:
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
             # 1. NUBE DE PALABRAS
-            st.subheader("☁️ Nube de Conceptos")
+            st.subheader(" Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             
@@ -361,7 +361,7 @@ if archivo and col_texto:
             st.markdown("---")
             
             # 2. DETECCIÓN DE ENTIDADES (NER)
-            st.subheader("🕵️ Detección de Entidades (NER)")
+            st.subheader(" Detección de Entidades (NER)")
             
             with st.spinner("Analizando gramática y entidades..."):
                 doc = nlp(full_text)
@@ -437,7 +437,7 @@ if archivo and col_texto:
             st.markdown("---")
             
             # 3. N-GRAMAS
-            st.subheader("🔠 Frases Recurrentes (N-Gramas)")
+            st.subheader(" Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             with c_bi:
                 try:
@@ -590,7 +590,7 @@ if archivo and col_texto:
 
     # ---------------- TAB 7: MONITOR DE TENDENCIAS ----------------
     with tabs[6]:
-        st.subheader("⏳ Monitor de Tendencias y Agenda")
+        st.subheader(" Monitor de Tendencias y Agenda")
         
         if col_fecha != "No aplicar":
             try:
@@ -603,7 +603,7 @@ if archivo and col_texto:
                     intervalo = "D" 
                     
                     # 1. RANKING DE ACTORES
-                    st.subheader("🏆 La Carrera de la Agenda")
+                    st.subheader(" La Carrera de la Agenda")
                     st.caption("Visualiza quién domina la conversación.")
                     
                     tipo_tendencia = st.radio("Analizar:", ["Personas", "Organizaciones", "Temas (Clave)"], horizontal=True)
@@ -647,7 +647,7 @@ if archivo and col_texto:
                     # 2. MATRIZ DE CALOR
                     if col_cat != "No aplicar":
                         st.markdown("---")
-                        st.subheader(f"🔥 Matriz de Intensidad: {col_cat} vs Tiempo")
+                        st.subheader(f"Matriz de Intensidad: {col_cat} vs Tiempo")
                         heatmap_data = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), col_cat]).size().reset_index(name='Cantidad')
                         
                         top_fuentes = heatmap_data.groupby(col_cat)['Cantidad'].sum().nlargest(15).index.tolist()
