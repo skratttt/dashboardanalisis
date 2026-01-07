@@ -17,6 +17,7 @@ import tempfile
 import os
 import zipfile 
 import io
+import numpy as np
 
 # ==========================================
 # 0. CONFIGURACIÓN GLOBAL Y RECOLECTOR
@@ -34,7 +35,6 @@ def mostrar_y_guardar(fig, nombre_archivo, use_container_width=True):
     2. Lo guarda en la memoria permanente para el ZIP.
     """
     st.plotly_chart(fig, use_container_width=use_container_width)
-    
     clean_name = "".join(x for x in nombre_archivo if x.isalnum() or x in " -_").strip()
     st.session_state.figures_to_export[clean_name] = fig
 
@@ -125,11 +125,9 @@ def get_top_ngrams(corpus, n=2, top_k=10, stopwords=[]):
     words_freq = sorted(words_freq, key=lambda x: x[1], reverse=True)
     return pd.DataFrame(words_freq[:top_k], columns=['Frase', 'Frecuencia'])
 
-# Función Helper para predecir por lotes (OPTIMIZADA PARA BIG DATA)
 def predecir_lote(textos, tokenizer, model):
     batch_size = 32
     preds = []
-    # Barra de progreso interna para inferencia
     progreso_inferencia = st.progress(0)
     total_batches = (len(textos) // batch_size) + 1
     
@@ -139,21 +137,18 @@ def predecir_lote(textos, tokenizer, model):
         with torch.no_grad():
             outputs = model(**inputs)
         probs = torch.softmax(outputs.logits, dim=1)
-        # 0: Negativo, 1: Positivo
         batch_preds = ["Positivo" if p[1] > p[0] else "Negativo" for p in probs]
         preds.extend(batch_preds)
-        
-        # Actualizar progreso
         progreso_inferencia.progress(min((i / batch_size + 1) / total_batches, 1.0))
         
-    progreso_inferencia.empty() # Limpiar barra al terminar
+    progreso_inferencia.empty()
     return preds
 
 # ==========================================
-# 3. SIDEBAR Y CARGA DE DATOS
+# 3. SIDEBAR Y CARGA DE DATOS INTELIGENTE
 # ==========================================
 with st.sidebar:
-    st.header("Configuracion del Dataset")
+    st.header("Configuración del Dataset")
     archivo = st.file_uploader("1. Subir Archivo (CSV)", type=["csv"])
     
     col_texto = None
@@ -168,22 +163,45 @@ with st.sidebar:
             st.session_state.last_file_id = file_id
             st.session_state.sentimiento_data = None
 
-        try:
+        # --- CARGA INTELIGENTE (EL FIX PARA TU ERROR) ---
+        df = None
+        errores_carga = []
+        
+        # Intentos en orden de probabilidad
+        combinaciones = [
+            {'sep': ',', 'encoding': 'utf-8'},
+            {'sep': ';', 'encoding': 'utf-8'},
+            {'sep': ',', 'encoding': 'latin-1'},
+            {'sep': ';', 'encoding': 'latin-1'},
+            {'sep': '\t', 'encoding': 'utf-8'} # Por si acaso es TSV
+        ]
+        
+        for config in combinaciones:
             try:
-                df = pd.read_csv(archivo, sep=';')
-                if df.shape[1] < 2:
-                    archivo.seek(0)
-                    df = pd.read_csv(archivo, sep=',')
-            except UnicodeDecodeError:
                 archivo.seek(0)
-                df = pd.read_csv(archivo, sep=';', encoding='latin-1')
-
+                df_temp = pd.read_csv(archivo, sep=config['sep'], encoding=config['encoding'])
+                # Verificación básica: Si tiene más de 1 columna, probablemente está bien
+                if df_temp.shape[1] > 1:
+                    df = df_temp
+                    break
+            except Exception as e:
+                errores_carga.append(str(e))
+                continue
+        
+        if df is None:
+            st.error(f"No se pudo leer el archivo automáticamente. Error: {errores_carga[-1]}")
+        else:
             st.success(f"Registros cargados: {len(df)}")
+            
+            # Normalizar nombres de columnas (quitar espacios, minúsculas)
+            df.columns = [c.strip() for c in df.columns]
             cols = df.columns.tolist()
             
+            # Auto-detector de columna de texto
             idx_txt = 0
-            for possible in ['texto', 'text', 'comentario', 'mensaje', 'descripcion', 'titulo']:
-                match = next((c for c in cols if possible.lower() == c.lower()), None)
+            posibles_nombres = ['texto', 'text', 'comentario', 'mensaje', 'descripcion', 'titulo', 'cuerpo', 'bajada', 'content', 'noticia']
+            for possible in posibles_nombres:
+                match = next((c for c in cols if possible.lower() in c.lower()), None)
                 if match:
                     idx_txt = cols.index(match)
                     break
@@ -191,11 +209,14 @@ with st.sidebar:
             col_texto = st.selectbox("2. Columna de TEXTO", cols, index=idx_txt)
             
             if col_texto:
+                # Limpieza base
+                df = df.dropna(subset=[col_texto])
+                df[col_texto] = df[col_texto].astype(str)
+                
                 def limpiar_texto_duro(txt):
                     if not isinstance(txt, str): return str(txt)
                     t = txt.lower()
                     t = t.replace("ee.uu.", "eeuu").replace("ee.uu", "eeuu")
-                    t = t.replace("ee. uu.", "eeuu").replace("ee. uu", "eeuu")
                     t = t.replace("&quot;", "").replace("quot", "")
                     return t
                 df[col_texto] = df[col_texto].apply(limpiar_texto_duro)
@@ -204,8 +225,7 @@ with st.sidebar:
             col_cat = st.selectbox("3. Columna de AGRUPACIÓN", ["No aplicar"] + cols)
             
             st.info("Opcional: Análisis Temporal")
-            col_fecha = st.selectbox("4. Columna de FECHA", ["No aplicar"] + cols, 
-                                   help="Debe ser una columna con fechas (ej: 2023-10-25)")
+            col_fecha = st.selectbox("4. Columna de FECHA", ["No aplicar"] + cols)
 
             st.header("Filtros de Texto")
             lista_defecto = "el, la, los, un, una, de, del, y, o, que, qué, quien, quién, por, para, con, se, su, sus, lo, las, al, como, cómo, mas, más, noticia, tras, segun, según, hace, puede, ser, es, son, fue, eran, era, habia, hay"
@@ -246,15 +266,11 @@ with st.sidebar:
                         except Exception as e:
                             st.error(f"Error generando ZIP (¿Instalaste kaleido?): {e}")
 
-        except Exception as e:
-            st.error(f"Error al leer archivo: {e}")
 
 # ==========================================
 # 4. APLICACIÓN PRINCIPAL
 # ==========================================
-if archivo and col_texto:
-    df = df.dropna(subset=[col_texto])
-    df[col_texto] = df[col_texto].astype(str)
+if archivo and col_texto and df is not None:
     all_stopwords = get_stopwords(custom_stopwords)
 
     tabs = st.tabs(["Resumen Global", "Analisis de Sentimiento", "Análisis de Postura (ABSA)", "Lenguaje Profundo", "Clusterizacion (Temas)", "Busqueda", "Redes", "Monitor de Tendencias"])
@@ -273,12 +289,7 @@ if archivo and col_texto:
             fig = px.bar(conteo.head(20), x='Count', y='Categoria', orientation='h', 
                          title=f"Distribución por {col_cat}", text_auto=True)
             
-            fig.update_layout(
-                yaxis={'categoryorder':'total ascending'},
-                yaxis_tickmode='linear',
-                margin=dict(l=10, r=10, t=50, b=10)
-            )
-            fig.update_yaxes(automargin=True)
+            fig.update_layout(yaxis={'categoryorder':'total ascending'}, yaxis_tickmode='linear')
             mostrar_y_guardar(fig, f"Resumen_Distribucion_{col_cat}")
         else:
             st.info("Selecciona una columna de agrupación para ver estadísticas.")
@@ -336,7 +347,7 @@ if archivo and col_texto:
                         text_auto='.0f', hover_data={'Porcentaje':':.1f', 'Conteo':True},
                         color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'}, height=alto_grafico 
                     )
-                    fig_bar.update_layout(xaxis_title="% del Total", yaxis_title="", legend_title=dict(text=""), yaxis={'categoryorder':'total ascending'})
+                    fig_bar.update_layout(xaxis_title="% del Total", yaxis_title="", yaxis={'categoryorder':'total ascending'})
                     fig_bar.update_traces(textposition='inside', textfont_color='white')
                     mostrar_y_guardar(fig_bar, f"Sentimiento_Detalle_{col_cat}")
                     
@@ -348,12 +359,11 @@ if archivo and col_texto:
                 else:
                     st.info(f"Selecciona una columna de agrupación en la barra lateral.")
 
-    # ---------------- TAB 3 (OPTIMIZADA): ANÁLISIS DE POSTURA (ABSA) ----------------
+    # ---------------- TAB 3: ANÁLISIS DE POSTURA (ABSA) ----------------
     with tabs[2]:
         st.subheader("🎯 Análisis de Postura y Aspectos (ABSA)")
-        st.markdown("Descubre qué se dice sobre actores específicos o temas clave, analizando solo las frases donde aparecen.")
+        st.markdown("Descubre qué se dice sobre actores específicos o temas clave.")
         
-        # 1. Input de Aspectos
         default_aspects = "Presidente, Seguridad, Economía, Salud, Educación"
         aspects_input = st.text_input("Define tus Objetivos de Interés (separados por coma):", value=default_aspects)
         
@@ -367,86 +377,51 @@ if archivo and col_texto:
                     nlp = cargar_spacy()
                     tok, mod = cargar_modelo_sentimiento()
                     
-                    # FASE 1: RECOLECCIÓN (Optimizado con nlp.pipe)
-                    # Usamos nlp.pipe para procesar grandes volúmenes rápidamente
-                    # Deshabilitamos 'ner' y 'lemmatizer' para ganar velocidad
                     relevant_sentences = [] 
-                    
                     docs_generator = nlp.pipe(df[col_texto].astype(str), batch_size=50, disable=["ner", "lemmatizer", "textcat"])
-                    
-                    # Barra de progreso para lectura
                     scan_bar = st.progress(0)
                     total_docs = len(df)
                     
                     for i, doc in enumerate(docs_generator):
-                        # Actualizar barra cada 100 docs para no ralentizar la UI
                         if i % 100 == 0:
                             scan_bar.progress(min((i+1)/total_docs, 1.0))
-                            
-                        # Buscar coincidencias en oraciones
                         for sent in doc.sents:
                             sent_lower = sent.text.lower()
                             for aspect in aspects_list:
                                 if aspect.lower() in sent_lower:
-                                    relevant_sentences.append({
-                                        'Aspecto': aspect,
-                                        'Frase': sent.text
-                                    })
-                                    
+                                    relevant_sentences.append({'Aspecto': aspect, 'Frase': sent.text})
                     scan_bar.empty()
                     
-                    # FASE 2: INFERENCIA POR LOTES (Batching)
                     if len(relevant_sentences) > 0:
                         st.info(f"Se encontraron {len(relevant_sentences)} frases relevantes. Analizando sentimiento...")
-                        
-                        # Extraemos solo los textos para enviarlos al modelo
                         textos_a_analizar = [item['Frase'] for item in relevant_sentences]
-                        
-                        # Inferencia masiva
                         predicciones = predecir_lote(textos_a_analizar, tok, mod)
-                        
-                        # Asignamos resultados de vuelta
                         for i, pred in enumerate(predicciones):
                             relevant_sentences[i]['Sentimiento'] = pred
                         
-                        # Creación del DataFrame de Resultados
                         df_absa = pd.DataFrame(relevant_sentences)
                         
-                        # --- VISUALIZACIÓN ---
-                        
-                        # 1. Gráfico de Barras Agrupadas
                         absa_counts = df_absa.groupby(['Aspecto', 'Sentimiento']).size().reset_index(name='Menciones')
-                        
                         pos_counts = absa_counts[absa_counts['Sentimiento'] == 'Positivo'].set_index('Aspecto')['Menciones']
                         total_counts = absa_counts.groupby('Aspecto')['Menciones'].sum()
                         approval_rate = (pos_counts / total_counts).fillna(0).sort_values(ascending=True) 
                         
                         fig_absa = px.bar(
-                            absa_counts, 
-                            y='Aspecto', 
-                            x='Menciones', 
-                            color='Sentimiento', 
-                            orientation='h',
+                            absa_counts, y='Aspecto', x='Menciones', color='Sentimiento', orientation='h',
                             title="Ranking de Imagen (Positivo vs Negativo)",
                             color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'},
                             category_orders={'Aspecto': approval_rate.index.tolist()}
                         )
                         mostrar_y_guardar(fig_absa, "ABSA_Ranking_Imagen")
                         
-                        # 2. Matriz de Calor
-                        st.markdown("---")
                         c_heat1, c_heat2 = st.columns([2, 1])
-                        
                         with c_heat1:
                             pivot_absa = absa_counts.pivot(index='Aspecto', columns='Sentimiento', values='Menciones').fillna(0)
                             pivot_absa['Total'] = pivot_absa.sum(axis=1)
                             pivot_absa['% Positivo'] = ((pivot_absa.get('Positivo', 0) / pivot_absa['Total']) * 100).round(1)
-                            
-                            st.markdown("#### Detalle de Percepción")
                             st.dataframe(pivot_absa.style.background_gradient(subset=['% Positivo'], cmap='RdYlGn', vmin=0, vmax=100), use_container_width=True)
 
                         with c_heat2:
-                            st.markdown("#### Frases Clave (Negativas)")
                             neg_examples = df_absa[df_absa['Sentimiento'] == 'Negativo'].sample(min(5, len(df_absa)))
                             for _, row in neg_examples.iterrows():
                                 st.error(f"**{row['Aspecto']}:** \"{row['Frase']}\"")
@@ -462,8 +437,6 @@ if archivo and col_texto:
             st.subheader("☁️ Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
-            # Solución definitiva para numpy/wordcloud
-            import numpy as np
             ax.imshow(np.array(wc.to_image()), interpolation='bilinear')
             ax.axis('off')
             st.pyplot(fig)
@@ -474,7 +447,6 @@ if archivo and col_texto:
             
             with st.spinner("Analizando gramática y entidades..."):
                 doc = nlp(full_text)
-                
                 def es_entidad_valida(entidad):
                     txt = entidad.text.lower().strip()
                     if txt in all_stopwords or len(txt) < 3: return False
@@ -489,7 +461,6 @@ if archivo and col_texto:
                 per = []
                 org = []
                 loc = []
-                
                 for e in doc.ents:
                     if es_entidad_valida(e):
                         if e.label_ == "PER": per.append(e.text)
@@ -542,7 +513,6 @@ if archivo and col_texto:
     # ---------------- TAB 5: CLUSTERIZACION ----------------
     with tabs[4]:
         st.subheader("Detección de Patrones (Topic Modeling)")
-        
         c_controls_1, c_controls_2 = st.columns(2)
         with c_controls_1:
             n_topics_aprox = st.slider("Número de Temas Deseados", 2, 50, 5)
@@ -603,7 +573,6 @@ if archivo and col_texto:
                             with cols_wc[i % 3]:
                                 st.markdown(f"**Grupo {topic_id}**")
                                 fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
-                                import numpy as np
                                 ax_wc.imshow(np.array(wc_cluster.to_image()), interpolation='bilinear')
                                 ax_wc.axis('off')
                                 st.pyplot(fig_wc)
