@@ -144,9 +144,7 @@ def predecir_lote(textos, tokenizer, model):
     progreso_inferencia.empty()
     return preds
 
-# ==========================================
-# 3. SIDEBAR Y CARGA DE DATOS INTELIGENTE
-# ==========================================
+#sidebar
 with st.sidebar:
     st.header("Configuración del Dataset")
     archivo = st.file_uploader("1. Subir Archivo (CSV)", type=["csv"])
@@ -163,43 +161,55 @@ with st.sidebar:
             st.session_state.last_file_id = file_id
             st.session_state.sentimiento_data = None
 
-        # --- CARGA INTELIGENTE (EL FIX PARA TU ERROR) ---
+        # --- CARGA BLINDADA ---
         df = None
         errores_carga = []
         
-        # Intentos en orden de probabilidad
+        # Intentos con corrección de errores (on_bad_lines='skip')
         combinaciones = [
             {'sep': ',', 'encoding': 'utf-8'},
             {'sep': ';', 'encoding': 'utf-8'},
             {'sep': ',', 'encoding': 'latin-1'},
             {'sep': ';', 'encoding': 'latin-1'},
-            {'sep': '\t', 'encoding': 'utf-8'} # Por si acaso es TSV
+            {'sep': '\t', 'encoding': 'utf-8'}
         ]
         
         for config in combinaciones:
             try:
                 archivo.seek(0)
-                df_temp = pd.read_csv(archivo, sep=config['sep'], encoding=config['encoding'])
-                # Verificación básica: Si tiene más de 1 columna, probablemente está bien
-                if df_temp.shape[1] > 1:
+                # engine='python' es más flexible y on_bad_lines='skip' ignora filas rotas
+                df_temp = pd.read_csv(
+                    archivo, 
+                    sep=config['sep'], 
+                    encoding=config['encoding'], 
+                    on_bad_lines='skip', 
+                    engine='python'
+                )
+                
+                if df_temp.shape[1] > 1: # Si detectó columnas, es válido
                     df = df_temp
+                    st.toast(f"Archivo leído con éxito usando: {config}", icon="✅")
                     break
             except Exception as e:
                 errores_carga.append(str(e))
                 continue
         
         if df is None:
-            st.error(f"No se pudo leer el archivo automáticamente. Error: {errores_carga[-1]}")
+            st.error("No se pudo leer el archivo. Posibles causas: El CSV está muy dañado o el formato es desconocido.")
+            with st.expander("Ver detalles del error"):
+                st.write(errores_carga)
         else:
             st.success(f"Registros cargados: {len(df)}")
             
-            # Normalizar nombres de columnas (quitar espacios, minúsculas)
-            df.columns = [c.strip() for c in df.columns]
+            # Limpieza de nombres de columnas
+            df.columns = [str(c).strip() for c in df.columns]
             cols = df.columns.tolist()
             
             # Auto-detector de columna de texto
             idx_txt = 0
-            posibles_nombres = ['texto', 'text', 'comentario', 'mensaje', 'descripcion', 'titulo', 'cuerpo', 'bajada', 'content', 'noticia']
+            # Agregué más variaciones comunes en noticias
+            posibles_nombres = ['texto', 'text', 'body', 'comentario', 'mensaje', 'descripcion', 'titulo', 'title', 'cuerpo', 'bajada', 'content', 'noticia', 'headline']
+            
             for possible in posibles_nombres:
                 match = next((c for c in cols if possible.lower() in c.lower()), None)
                 if match:
@@ -209,15 +219,14 @@ with st.sidebar:
             col_texto = st.selectbox("2. Columna de TEXTO", cols, index=idx_txt)
             
             if col_texto:
-                # Limpieza base
+                # Conversión forzosa a String para evitar errores de números
                 df = df.dropna(subset=[col_texto])
                 df[col_texto] = df[col_texto].astype(str)
                 
                 def limpiar_texto_duro(txt):
                     if not isinstance(txt, str): return str(txt)
                     t = txt.lower()
-                    t = t.replace("ee.uu.", "eeuu").replace("ee.uu", "eeuu")
-                    t = t.replace("&quot;", "").replace("quot", "")
+                    t = t.replace("ee.uu.", "eeuu").replace("&quot;", "").replace('"', '')
                     return t
                 df[col_texto] = df[col_texto].apply(limpiar_texto_duro)
 
@@ -247,9 +256,9 @@ with st.sidebar:
             if st.button("Generar Reporte Visual (ZIP)"):
                 graficos = st.session_state.figures_to_export
                 if not graficos:
-                    st.warning("⚠️ No hay gráficos en memoria. Navega por las pestañas para generarlos primero.")
+                    st.warning("⚠️ No hay gráficos en memoria.")
                 else:
-                    with st.spinner(f"📸 Procesando {len(graficos)} gráficos..."):
+                    with st.spinner(f"📸 Procesando..."):
                         try:
                             zip_buffer = io.BytesIO()
                             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -258,13 +267,13 @@ with st.sidebar:
                                     zf.writestr(f"{nombre}.png", img_bytes)
                             
                             st.download_button(
-                                label=f"📥 Descargar ZIP ({len(graficos)} gráficos)",
+                                label=f"📥 Descargar ZIP",
                                 data=zip_buffer.getvalue(),
                                 file_name="reporte_graficos.zip",
                                 mime="application/zip"
                             )
                         except Exception as e:
-                            st.error(f"Error generando ZIP (¿Instalaste kaleido?): {e}")
+                            st.error(f"Error: {e}")
 
 
 # ==========================================
