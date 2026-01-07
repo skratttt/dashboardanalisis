@@ -144,7 +144,9 @@ def predecir_lote(textos, tokenizer, model):
     progreso_inferencia.empty()
     return preds
 
-#sidebar
+# ==========================================
+# 3. SIDEBAR Y CARGA DE DATOS (VERSIÓN TANQUE)
+# ==========================================
 with st.sidebar:
     st.header("Configuración del Dataset")
     archivo = st.file_uploader("1. Subir Archivo (CSV)", type=["csv"])
@@ -165,7 +167,6 @@ with st.sidebar:
         df = None
         errores_carga = []
         
-        # Intentos con corrección de errores (on_bad_lines='skip')
         combinaciones = [
             {'sep': ',', 'encoding': 'utf-8'},
             {'sep': ';', 'encoding': 'utf-8'},
@@ -177,7 +178,7 @@ with st.sidebar:
         for config in combinaciones:
             try:
                 archivo.seek(0)
-                # engine='python' es más flexible y on_bad_lines='skip' ignora filas rotas
+                # Engine python + on_bad_lines='skip' para saltar errores
                 df_temp = pd.read_csv(
                     archivo, 
                     sep=config['sep'], 
@@ -186,28 +187,26 @@ with st.sidebar:
                     engine='python'
                 )
                 
-                if df_temp.shape[1] > 1: # Si detectó columnas, es válido
+                if df_temp.shape[1] > 1:
                     df = df_temp
-                    st.toast(f"Archivo leído con éxito usando: {config}", icon="✅")
+                    # st.toast(f"Archivo leído con: {config}", icon="✅")
                     break
             except Exception as e:
                 errores_carga.append(str(e))
                 continue
         
         if df is None:
-            st.error("No se pudo leer el archivo. Posibles causas: El CSV está muy dañado o el formato es desconocido.")
+            st.error("No se pudo leer el archivo. Intenta guardarlo como CSV UTF-8.")
             with st.expander("Ver detalles del error"):
                 st.write(errores_carga)
         else:
             st.success(f"Registros cargados: {len(df)}")
             
-            # Limpieza de nombres de columnas
+            # Limpieza de columnas
             df.columns = [str(c).strip() for c in df.columns]
             cols = df.columns.tolist()
             
-            # Auto-detector de columna de texto
             idx_txt = 0
-            # Agregué más variaciones comunes en noticias
             posibles_nombres = ['texto', 'text', 'body', 'comentario', 'mensaje', 'descripcion', 'titulo', 'title', 'cuerpo', 'bajada', 'content', 'noticia', 'headline']
             
             for possible in posibles_nombres:
@@ -219,7 +218,6 @@ with st.sidebar:
             col_texto = st.selectbox("2. Columna de TEXTO", cols, index=idx_txt)
             
             if col_texto:
-                # Conversión forzosa a String para evitar errores de números
                 df = df.dropna(subset=[col_texto])
                 df[col_texto] = df[col_texto].astype(str)
                 
@@ -274,7 +272,6 @@ with st.sidebar:
                             )
                         except Exception as e:
                             st.error(f"Error: {e}")
-
 
 # ==========================================
 # 4. APLICACIÓN PRINCIPAL
@@ -368,7 +365,7 @@ if archivo and col_texto and df is not None:
                 else:
                     st.info(f"Selecciona una columna de agrupación en la barra lateral.")
 
-    # ---------------- TAB 3: ANÁLISIS DE POSTURA (ABSA) ----------------
+    # ---------------- TAB 3: ANÁLISIS DE POSTURA (ABSA) - CORREGIDA ----------------
     with tabs[2]:
         st.subheader("🎯 Análisis de Postura y Aspectos (ABSA)")
         st.markdown("Descubre qué se dice sobre actores específicos o temas clave.")
@@ -410,6 +407,7 @@ if archivo and col_texto and df is not None:
                         
                         df_absa = pd.DataFrame(relevant_sentences)
                         
+                        # Gráfico
                         absa_counts = df_absa.groupby(['Aspecto', 'Sentimiento']).size().reset_index(name='Menciones')
                         pos_counts = absa_counts[absa_counts['Sentimiento'] == 'Positivo'].set_index('Aspecto')['Menciones']
                         total_counts = absa_counts.groupby('Aspecto')['Menciones'].sum()
@@ -431,9 +429,20 @@ if archivo and col_texto and df is not None:
                             st.dataframe(pivot_absa.style.background_gradient(subset=['% Positivo'], cmap='RdYlGn', vmin=0, vmax=100), use_container_width=True)
 
                         with c_heat2:
-                            neg_examples = df_absa[df_absa['Sentimiento'] == 'Negativo'].sample(min(5, len(df_absa)))
-                            for _, row in neg_examples.iterrows():
-                                st.error(f"**{row['Aspecto']}:** \"{row['Frase']}\"")
+                            st.markdown("#### Frases Clave (Negativas)")
+                            # --- CORRECCIÓN DEL ERROR DE MUESTREO ---
+                            # Filtramos solo los negativos
+                            df_negativos = df_absa[df_absa['Sentimiento'] == 'Negativo']
+                            
+                            if not df_negativos.empty:
+                                # Tomamos 5 o el total disponible, lo que sea menor
+                                n_muestras = min(5, len(df_negativos))
+                                neg_examples = df_negativos.sample(n_muestras)
+                                
+                                for _, row in neg_examples.iterrows():
+                                    st.error(f"**{row['Aspecto']}:** \"{row['Frase']}\"")
+                            else:
+                                st.success("No se detectaron comentarios negativos para estos objetivos.")
                     else:
                         st.warning("No se encontraron menciones de los objetivos en el texto.")
 
@@ -446,6 +455,7 @@ if archivo and col_texto and df is not None:
             st.subheader("☁️ Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
+            # Fix de numpy para Wordcloud
             ax.imshow(np.array(wc.to_image()), interpolation='bilinear')
             ax.axis('off')
             st.pyplot(fig)
