@@ -89,7 +89,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🔭 Observatorio de Datos: Análisis Político y Social")
+st.title("Análisis Político y Social")
 st.markdown("Plataforma de inteligencia para el monitoreo de agenda, actores y sentimiento público.")
 
 # ==========================================
@@ -240,7 +240,7 @@ with st.sidebar:
             custom_stopwords = [x.strip().lower() for x in stopwords_input.split(",")]
             
             st.markdown("---")
-            st.header("🔍 Filtro Global")
+            st.header(" Filtro Global")
             filtro_palabra = st.text_input("Filtrar análisis por palabra clave:", placeholder="Ej: litio...")
             
             if filtro_palabra:
@@ -254,9 +254,9 @@ with st.sidebar:
             if st.button("Generar Reporte Visual (ZIP)"):
                 graficos = st.session_state.figures_to_export
                 if not graficos:
-                    st.warning("⚠️ No hay gráficos en memoria.")
+                    st.warning(" No hay gráficos en memoria.")
                 else:
-                    with st.spinner(f"📸 Procesando..."):
+                    with st.spinner(f"Procesando..."):
                         try:
                             zip_buffer = io.BytesIO()
                             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -318,7 +318,7 @@ if archivo and col_texto and df is not None:
         if st.session_state.sentimiento_data is not None:
             df['Sentimiento'] = st.session_state.sentimiento_data
             
-            if st.button("🔄 Reiniciar Análisis", type="secondary"):
+            if st.button(" Reiniciar Análisis", type="secondary"):
                 st.session_state.sentimiento_data = None
                 st.rerun()
 
@@ -357,7 +357,7 @@ if archivo and col_texto and df is not None:
                     fig_bar.update_traces(textposition='inside', textfont_color='white')
                     mostrar_y_guardar(fig_bar, f"Sentimiento_Detalle_{col_cat}")
                     
-                    with st.expander("📊 Ver Tabla de Datos Exactos", expanded=True):
+                    with st.expander("Ver Tabla de Datos Exactos", expanded=True):
                         tabla = pd.crosstab(df_f[col_cat], df_f['Sentimiento'])
                         tabla['Total'] = tabla.sum(axis=1)
                         tabla = tabla.sort_values('Total', ascending=False)
@@ -367,13 +367,13 @@ if archivo and col_texto and df is not None:
 
     # ---------------- TAB 3: ANÁLISIS DE POSTURA (ABSA) - CORREGIDA ----------------
     with tabs[2]:
-        st.subheader("🎯 Análisis de Postura y Aspectos (ABSA)")
+        st.subheader(" Análisis de Postura y Aspectos (ABSA)")
         st.markdown("Descubre qué se dice sobre actores específicos o temas clave.")
         
         default_aspects = "Presidente, Seguridad, Economía, Salud, Educación"
         aspects_input = st.text_input("Define tus Objetivos de Interés (separados por coma):", value=default_aspects)
         
-        if st.button("🔎 Analizar Postura de Objetivos", type="primary"):
+        if st.button("Analizar Postura de Objetivos", type="primary"):
             aspects_list = [x.strip() for x in aspects_input.split(",") if len(x.strip()) > 0]
             
             if not aspects_list:
@@ -452,7 +452,7 @@ if archivo and col_texto and df is not None:
             nlp = cargar_spacy()
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            st.subheader("☁️ Nube de Conceptos")
+            st.subheader(" Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
             # Fix de numpy para Wordcloud
@@ -462,7 +462,7 @@ if archivo and col_texto and df is not None:
             plt.close()
 
             st.markdown("---")
-            st.subheader("🕵️ Detección de Entidades (NER)")
+            st.subheader(" Detección de Entidades (NER)")
             
             with st.spinner("Analizando gramática y entidades..."):
                 doc = nlp(full_text)
@@ -512,7 +512,7 @@ if archivo and col_texto and df is not None:
             else: st.info("Sin Lugares detectados")
 
             st.markdown("---")
-            st.subheader("🔠 Frases Recurrentes (N-Gramas)")
+            st.subheader(" Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             with c_bi:
                 try:
@@ -661,7 +661,7 @@ if archivo and col_texto and df is not None:
 
     # ---------------- TAB 8: MONITOR DE TENDENCIAS ----------------
     with tabs[7]:
-        st.subheader("⏳ Monitor de Tendencias y Agenda")
+        st.subheader(" Monitor de Tendencias y Agenda")
         
         if col_fecha != "No aplicar":
             try:
@@ -672,7 +672,7 @@ if archivo and col_texto and df is not None:
                 if len(df_time) > 0:
                     intervalo = "D" 
                     
-                    st.subheader("🏆 La Carrera de la Agenda")
+                    st.subheader("¿que se habla?")
                     st.caption("Visualiza quién domina la conversación.")
                     
                     tipo_tendencia = st.radio("Analizar:", ["Personas", "Organizaciones", "Temas (Clave)"], horizontal=True)
@@ -713,7 +713,7 @@ if archivo and col_texto and df is not None:
 
                     if col_cat != "No aplicar":
                         st.markdown("---")
-                        st.subheader(f"🔥 Matriz de Intensidad: {col_cat} vs Tiempo")
+                        st.subheader(f" Matriz de Intensidad: {col_cat} vs Tiempo")
                         heatmap_data = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), col_cat]).size().reset_index(name='Cantidad')
                         
                         top_fuentes = heatmap_data.groupby(col_cat)['Cantidad'].sum().nlargest(15).index.tolist()
