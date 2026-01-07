@@ -41,7 +41,7 @@ def mostrar_y_guardar(fig, nombre_archivo, use_container_width=True):
 # ==========================================
 # 1. CONFIGURACIÓN ESTILO STREAMLIT
 # ==========================================
-st.set_page_config(page_title="Analisis de texto", layout="wide")
+st.set_page_config(page_title="Observatorio Político", layout="wide")
 
 st.markdown("""
 <style>
@@ -89,8 +89,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Analisis de texto")
-st.markdown("Suite de analisis de Sentimiento, Entidades, N-Gramas, Temas y Redes.")
+st.title("🔭 Observatorio de Datos: Análisis Político y Social")
+st.markdown("Plataforma de inteligencia para el monitoreo de agenda, actores y sentimiento público.")
 
 # ==========================================
 # 2. FUNCIONES CACHEADAS
@@ -124,6 +124,30 @@ def get_top_ngrams(corpus, n=2, top_k=10, stopwords=[]):
     words_freq = [(word, sum_words[0, idx]) for word, idx in vec.vocabulary_.items()]
     words_freq = sorted(words_freq, key=lambda x: x[1], reverse=True)
     return pd.DataFrame(words_freq[:top_k], columns=['Frase', 'Frecuencia'])
+
+# Función Helper para predecir por lotes (OPTIMIZADA PARA BIG DATA)
+def predecir_lote(textos, tokenizer, model):
+    batch_size = 32
+    preds = []
+    # Barra de progreso interna para inferencia
+    progreso_inferencia = st.progress(0)
+    total_batches = (len(textos) // batch_size) + 1
+    
+    for i in range(0, len(textos), batch_size):
+        batch = textos[i:i+batch_size]
+        inputs = tokenizer(batch, return_tensors="pt", padding=True, truncation=True, max_length=128).to("cpu")
+        with torch.no_grad():
+            outputs = model(**inputs)
+        probs = torch.softmax(outputs.logits, dim=1)
+        # 0: Negativo, 1: Positivo
+        batch_preds = ["Positivo" if p[1] > p[0] else "Negativo" for p in probs]
+        preds.extend(batch_preds)
+        
+        # Actualizar progreso
+        progreso_inferencia.progress(min((i / batch_size + 1) / total_batches, 1.0))
+        
+    progreso_inferencia.empty() # Limpiar barra al terminar
+    return preds
 
 # ==========================================
 # 3. SIDEBAR Y CARGA DE DATOS
@@ -189,7 +213,7 @@ with st.sidebar:
             custom_stopwords = [x.strip().lower() for x in stopwords_input.split(",")]
             
             st.markdown("---")
-            st.header(" Filtro Global")
+            st.header("🔍 Filtro Global")
             filtro_palabra = st.text_input("Filtrar análisis por palabra clave:", placeholder="Ej: litio...")
             
             if filtro_palabra:
@@ -198,14 +222,14 @@ with st.sidebar:
                 st.success(f"Filtrado: {len(df)} registros contienen '{filtro_palabra}'")
             
             st.markdown("---")
-            st.header(" Descarga Masiva")
+            st.header("📦 Descarga Masiva")
             
             if st.button("Generar Reporte Visual (ZIP)"):
                 graficos = st.session_state.figures_to_export
                 if not graficos:
-                    st.warning(" No hay gráficos en memoria. Navega por las pestañas para generarlos primero.")
+                    st.warning("⚠️ No hay gráficos en memoria. Navega por las pestañas para generarlos primero.")
                 else:
-                    with st.spinner(f" Procesando {len(graficos)} gráficos..."):
+                    with st.spinner(f"📸 Procesando {len(graficos)} gráficos..."):
                         try:
                             zip_buffer = io.BytesIO()
                             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -214,7 +238,7 @@ with st.sidebar:
                                     zf.writestr(f"{nombre}.png", img_bytes)
                             
                             st.download_button(
-                                label=f"Descargar ZIP ({len(graficos)} gráficos)",
+                                label=f"📥 Descargar ZIP ({len(graficos)} gráficos)",
                                 data=zip_buffer.getvalue(),
                                 file_name="reporte_graficos.zip",
                                 mime="application/zip"
@@ -233,7 +257,7 @@ if archivo and col_texto:
     df[col_texto] = df[col_texto].astype(str)
     all_stopwords = get_stopwords(custom_stopwords)
 
-    tabs = st.tabs(["Resumen Global", "Analisis de Sentimiento", "Lenguaje Profundo", "Clusterizacion (Temas)", "Busqueda", "Redes", "Monitor de Tendencias"])
+    tabs = st.tabs(["Resumen Global", "Analisis de Sentimiento", "Análisis de Postura (ABSA)", "Lenguaje Profundo", "Clusterizacion (Temas)", "Busqueda", "Redes", "Monitor de Tendencias"])
 
     # ---------------- TAB 1: RESUMEN ----------------
     with tabs[0]:
@@ -261,30 +285,16 @@ if archivo and col_texto:
 
     # ---------------- TAB 2: SENTIMIENTO ----------------
     with tabs[1]:
-        st.subheader("Clasificacion de Tono")
+        st.subheader("Clasificacion de Tono Global")
         
         if 'sentimiento_data' not in st.session_state:
             st.session_state.sentimiento_data = None
         
         if st.session_state.sentimiento_data is None:
-            if st.button("Ejecutar Modelo de Sentimiento", type="primary"):
+            if st.button("Ejecutar Modelo de Sentimiento (General)", type="primary"):
                 with st.spinner("Procesando..."):
                     tok, mod = cargar_modelo_sentimiento()
-                    
-                    def predict(txts):
-                        inp = tok(txts, return_tensors="pt", padding=True, truncation=True, max_length=128).to("cpu")
-                        with torch.no_grad(): out = mod(**inp)
-                        return ["Positivo" if p[1]>p[0] else "Negativo" for p in torch.softmax(out.logits, dim=1)]
-                    
-                    res = []
-                    bs = 32
-                    prog = st.progress(0)
-                    txts = df[col_texto].tolist()
-                    
-                    for i in range(0, len(txts), bs):
-                        res.extend(predict(txts[i:i+bs]))
-                        prog.progress(min((i+bs)/len(txts), 1.0))
-                    
+                    res = predecir_lote(df[col_texto].tolist(), tok, mod)
                     st.session_state.sentimiento_data = res
                     st.rerun()
 
@@ -330,7 +340,7 @@ if archivo and col_texto:
                     fig_bar.update_traces(textposition='inside', textfont_color='white')
                     mostrar_y_guardar(fig_bar, f"Sentimiento_Detalle_{col_cat}")
                     
-                    with st.expander(" Ver Tabla de Datos Exactos", expanded=True):
+                    with st.expander("📊 Ver Tabla de Datos Exactos", expanded=True):
                         tabla = pd.crosstab(df_f[col_cat], df_f['Sentimiento'])
                         tabla['Total'] = tabla.sum(axis=1)
                         tabla = tabla.sort_values('Total', ascending=False)
@@ -338,66 +348,143 @@ if archivo and col_texto:
                 else:
                     st.info(f"Selecciona una columna de agrupación en la barra lateral.")
 
-    # ---------------- TAB 3: LENGUAJE PROFUNDO (NER CON BLACKLIST) ----------------
+    # ---------------- TAB 3 (OPTIMIZADA): ANÁLISIS DE POSTURA (ABSA) ----------------
     with tabs[2]:
+        st.subheader("🎯 Análisis de Postura y Aspectos (ABSA)")
+        st.markdown("Descubre qué se dice sobre actores específicos o temas clave, analizando solo las frases donde aparecen.")
+        
+        # 1. Input de Aspectos
+        default_aspects = "Presidente, Seguridad, Economía, Salud, Educación"
+        aspects_input = st.text_input("Define tus Objetivos de Interés (separados por coma):", value=default_aspects)
+        
+        if st.button("🔎 Analizar Postura de Objetivos", type="primary"):
+            aspects_list = [x.strip() for x in aspects_input.split(",") if len(x.strip()) > 0]
+            
+            if not aspects_list:
+                st.warning("Ingresa al menos un objetivo.")
+            else:
+                with st.spinner("Escaneando textos (Fase 1/2)..."):
+                    nlp = cargar_spacy()
+                    tok, mod = cargar_modelo_sentimiento()
+                    
+                    # FASE 1: RECOLECCIÓN (Optimizado con nlp.pipe)
+                    # Usamos nlp.pipe para procesar grandes volúmenes rápidamente
+                    # Deshabilitamos 'ner' y 'lemmatizer' para ganar velocidad
+                    relevant_sentences = [] 
+                    
+                    docs_generator = nlp.pipe(df[col_texto].astype(str), batch_size=50, disable=["ner", "lemmatizer", "textcat"])
+                    
+                    # Barra de progreso para lectura
+                    scan_bar = st.progress(0)
+                    total_docs = len(df)
+                    
+                    for i, doc in enumerate(docs_generator):
+                        # Actualizar barra cada 100 docs para no ralentizar la UI
+                        if i % 100 == 0:
+                            scan_bar.progress(min((i+1)/total_docs, 1.0))
+                            
+                        # Buscar coincidencias en oraciones
+                        for sent in doc.sents:
+                            sent_lower = sent.text.lower()
+                            for aspect in aspects_list:
+                                if aspect.lower() in sent_lower:
+                                    relevant_sentences.append({
+                                        'Aspecto': aspect,
+                                        'Frase': sent.text
+                                    })
+                                    
+                    scan_bar.empty()
+                    
+                    # FASE 2: INFERENCIA POR LOTES (Batching)
+                    if len(relevant_sentences) > 0:
+                        st.info(f"Se encontraron {len(relevant_sentences)} frases relevantes. Analizando sentimiento...")
+                        
+                        # Extraemos solo los textos para enviarlos al modelo
+                        textos_a_analizar = [item['Frase'] for item in relevant_sentences]
+                        
+                        # Inferencia masiva
+                        predicciones = predecir_lote(textos_a_analizar, tok, mod)
+                        
+                        # Asignamos resultados de vuelta
+                        for i, pred in enumerate(predicciones):
+                            relevant_sentences[i]['Sentimiento'] = pred
+                        
+                        # Creación del DataFrame de Resultados
+                        df_absa = pd.DataFrame(relevant_sentences)
+                        
+                        # --- VISUALIZACIÓN ---
+                        
+                        # 1. Gráfico de Barras Agrupadas
+                        absa_counts = df_absa.groupby(['Aspecto', 'Sentimiento']).size().reset_index(name='Menciones')
+                        
+                        pos_counts = absa_counts[absa_counts['Sentimiento'] == 'Positivo'].set_index('Aspecto')['Menciones']
+                        total_counts = absa_counts.groupby('Aspecto')['Menciones'].sum()
+                        approval_rate = (pos_counts / total_counts).fillna(0).sort_values(ascending=True) 
+                        
+                        fig_absa = px.bar(
+                            absa_counts, 
+                            y='Aspecto', 
+                            x='Menciones', 
+                            color='Sentimiento', 
+                            orientation='h',
+                            title="Ranking de Imagen (Positivo vs Negativo)",
+                            color_discrete_map={'Positivo':'#2ecc71', 'Negativo':'#e74c3c'},
+                            category_orders={'Aspecto': approval_rate.index.tolist()}
+                        )
+                        mostrar_y_guardar(fig_absa, "ABSA_Ranking_Imagen")
+                        
+                        # 2. Matriz de Calor
+                        st.markdown("---")
+                        c_heat1, c_heat2 = st.columns([2, 1])
+                        
+                        with c_heat1:
+                            pivot_absa = absa_counts.pivot(index='Aspecto', columns='Sentimiento', values='Menciones').fillna(0)
+                            pivot_absa['Total'] = pivot_absa.sum(axis=1)
+                            pivot_absa['% Positivo'] = ((pivot_absa.get('Positivo', 0) / pivot_absa['Total']) * 100).round(1)
+                            
+                            st.markdown("#### Detalle de Percepción")
+                            st.dataframe(pivot_absa.style.background_gradient(subset=['% Positivo'], cmap='RdYlGn', vmin=0, vmax=100), use_container_width=True)
+
+                        with c_heat2:
+                            st.markdown("#### Frases Clave (Negativas)")
+                            neg_examples = df_absa[df_absa['Sentimiento'] == 'Negativo'].sample(min(5, len(df_absa)))
+                            for _, row in neg_examples.iterrows():
+                                st.error(f"**{row['Aspecto']}:** \"{row['Frase']}\"")
+                    else:
+                        st.warning("No se encontraron menciones de los objetivos en el texto.")
+
+    # ---------------- TAB 4: LENGUAJE PROFUNDO ----------------
+    with tabs[3]:
         if st.button("Ejecutar Análisis Completo de Lenguaje"):
             nlp = cargar_spacy()
-            
-            # Unimos texto
             full_text = " ".join(df[col_texto].tolist())[:1000000]
             
-            # 1. NUBE DE PALABRAS
-            st.subheader(" Nube de Conceptos")
+            st.subheader("☁️ Nube de Conceptos")
             wc = WordCloud(width=800, height=300, background_color='white', stopwords=all_stopwords, colormap='viridis').generate(full_text)
             fig, ax = plt.subplots(figsize=(10, 4), facecolor='white')
-            
-            # Usamos .to_image() para arreglar el error de numpy
-            ax.imshow(wc.to_image(), interpolation='bilinear')
-            
+            # Solución definitiva para numpy/wordcloud
+            import numpy as np
+            ax.imshow(np.array(wc.to_image()), interpolation='bilinear')
             ax.axis('off')
             st.pyplot(fig)
             plt.close()
 
             st.markdown("---")
-            
-            # 2. DETECCIÓN DE ENTIDADES (NER)
-            st.subheader(" Detección de Entidades (NER)")
+            st.subheader("🕵️ Detección de Entidades (NER)")
             
             with st.spinner("Analizando gramática y entidades..."):
                 doc = nlp(full_text)
                 
-                # --- FUNCIÓN DE FILTRADO INTELIGENTE (CON LISTA NEGRA) ---
                 def es_entidad_valida(entidad):
                     txt = entidad.text.lower().strip()
-                    
-                    # A. FILTRO BÁSICO
                     if txt in all_stopwords or len(txt) < 3: return False
-                    
-                    # B. LISTA NEGRA: Palabras que el modelo confunde con Personas
-                    blacklist = [
-                        "magallanes", "ddhh", "chile", "biobio", "coquimbo", "araucania", 
-                        "valparaiso", "santiago", "region", "pais", "nacional", "gobierno",
-                        "estado", "municipalidad", "ministerio", "fiscalia", "carabineros",
-                        "pdi", "senado", "diputados", "camara", "comision", "oficina",
-                        "servicio", "direccion", "departamento", "unidad", "centro",
-                        "hospital", "universidad", "escuela", "colegio", "liceo",
-                        "presidente", "ministro", "alcalde", "gobernador", "diputado", 
-                        "senador", "concejal", "director", "jefe", "gerente", "seremi"
-                    ]
-                    
-                    # Verificamos si la entidad (o parte de ella) está en la lista negra
+                    blacklist = ["magallanes", "ddhh", "chile", "biobio", "coquimbo", "araucania", "valparaiso", "santiago", "region", "pais", "nacional", "gobierno", "estado", "municipalidad", "ministerio", "fiscalia", "carabineros", "pdi", "senado", "diputados", "camara", "comision", "oficina", "servicio", "direccion", "departamento", "unidad", "centro", "hospital", "universidad", "escuela", "colegio", "liceo", "presidente", "ministro", "alcalde", "gobernador", "diputado", "senador", "concejal", "director", "jefe", "gerente", "seremi"]
                     if txt in blacklist: return False
-                    
-                    # C. FILTRO DE BASURA
                     if "(" in txt or ")" in txt or "http" in txt or "%" in txt: return False
-                    
-                    # D. FILTRO GRAMATICAL
                     if len(entidad) == 1: 
                         pos = entidad[0].pos_
                         if pos in ["VERB", "ADV", "ADJ", "NUM", "AUX", "SCONJ", "DET"]: return False
-                        
                     return True
-                # -------------------------------------------------------------
 
                 per = []
                 org = []
@@ -435,9 +522,7 @@ if archivo and col_texto:
             else: st.info("Sin Lugares detectados")
 
             st.markdown("---")
-            
-            # 3. N-GRAMAS
-            st.subheader(" Frases Recurrentes (N-Gramas)")
+            st.subheader("🔠 Frases Recurrentes (N-Gramas)")
             c_bi, c_tri = st.columns(2)
             with c_bi:
                 try:
@@ -454,8 +539,8 @@ if archivo and col_texto:
                     mostrar_y_guardar(fig_tri, "Trigramas")
                 except: st.warning("No hay suficientes datos")
 
-    # ---------------- TAB 4: CLUSTERIZACION ----------------
-    with tabs[3]:
+    # ---------------- TAB 5: CLUSTERIZACION ----------------
+    with tabs[4]:
         st.subheader("Detección de Patrones (Topic Modeling)")
         
         c_controls_1, c_controls_2 = st.columns(2)
@@ -518,18 +603,16 @@ if archivo and col_texto:
                             with cols_wc[i % 3]:
                                 st.markdown(f"**Grupo {topic_id}**")
                                 fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
-                                
-                                # Usamos .to_image() para arreglar el error de numpy
-                                ax_wc.imshow(wc_cluster.to_image(), interpolation='bilinear')
-                                
+                                import numpy as np
+                                ax_wc.imshow(np.array(wc_cluster.to_image()), interpolation='bilinear')
                                 ax_wc.axis('off')
                                 st.pyplot(fig_wc)
                                 plt.close()
                 except Exception as e:
                     st.error(f"Error: {e}")
 
-    # ---------------- TAB 5: BUSQUEDA ----------------
-    with tabs[4]:
+    # ---------------- TAB 6: BUSQUEDA ----------------
+    with tabs[5]:
         st.subheader("Motor de Busqueda Semantica")
         query = st.text_input("Consulta:", placeholder="Ej: Problemas de infraestructura...")
         if query:
@@ -547,8 +630,8 @@ if archivo and col_texto:
                     st.markdown(f"""<div style="background-color:#f8f9fa;padding:15px;margin-bottom:10px;">
                         <small><b>Relevancia: {score:.2f}</b> | {cat_val}</small><br>{txt}</div>""", unsafe_allow_html=True)
 
-    # ---------------- TAB 6: REDES ----------------
-    with tabs[5]:
+    # ---------------- TAB 7: REDES ----------------
+    with tabs[6]:
         st.subheader("Relaciones entre Entidades")
         if st.button("Generar Grafo", type="primary"):
             with st.spinner("Procesando red..."):
@@ -588,9 +671,9 @@ if archivo and col_texto:
                 else:
                     st.warning("No se encontraron suficientes relaciones.")
 
-    # ---------------- TAB 7: MONITOR DE TENDENCIAS ----------------
-    with tabs[6]:
-        st.subheader(" Monitor de Tendencias y Agenda")
+    # ---------------- TAB 8: MONITOR DE TENDENCIAS ----------------
+    with tabs[7]:
+        st.subheader("⏳ Monitor de Tendencias y Agenda")
         
         if col_fecha != "No aplicar":
             try:
@@ -599,11 +682,9 @@ if archivo and col_texto:
                 df_time = df_time.dropna(subset=[col_fecha])
                 
                 if len(df_time) > 0:
-                    # Configuración Fija por defecto: DÍA
                     intervalo = "D" 
                     
-                    # 1. RANKING DE ACTORES
-                    st.subheader(" La Carrera de la Agenda")
+                    st.subheader("🏆 La Carrera de la Agenda")
                     st.caption("Visualiza quién domina la conversación.")
                     
                     tipo_tendencia = st.radio("Analizar:", ["Personas", "Organizaciones", "Temas (Clave)"], horizontal=True)
@@ -631,23 +712,20 @@ if archivo and col_texto:
                             if not pivot_trend.empty:
                                 pivot_trend['Ranking'] = pivot_trend.groupby(col_fecha)['Menciones'].rank(method='first', ascending=False)
                                 
-                                # Ranking (Bump Chart)
                                 fig_bump = px.line(pivot_trend, x=col_fecha, y='Ranking', color='Items', markers=True,
                                                   title=f"Ranking de {tipo_tendencia} (Top 6)", line_shape='spline')
                                 fig_bump.update_yaxes(autorange="reversed", dtick=1)
                                 mostrar_y_guardar(fig_bump, f"Ranking_{tipo_tendencia}")
                                 
-                                # Volumen Tendencia
                                 fig_line = px.line(pivot_trend, x=col_fecha, y='Menciones', color='Items',
                                                   title=f"Volumen de menciones", line_shape='spline')
                                 mostrar_y_guardar(fig_line, f"Volumen_Tendencia_{tipo_tendencia}")
                             else:
                                 st.warning("Datos insuficientes para tendencias.")
 
-                    # 2. MATRIZ DE CALOR
                     if col_cat != "No aplicar":
                         st.markdown("---")
-                        st.subheader(f"Matriz de Intensidad: {col_cat} vs Tiempo")
+                        st.subheader(f"🔥 Matriz de Intensidad: {col_cat} vs Tiempo")
                         heatmap_data = df_time.groupby([pd.Grouper(key=col_fecha, freq=intervalo), col_cat]).size().reset_index(name='Cantidad')
                         
                         top_fuentes = heatmap_data.groupby(col_cat)['Cantidad'].sum().nlargest(15).index.tolist()
@@ -658,7 +736,6 @@ if archivo and col_texto:
                         fig_heat.update_layout(yaxis_nticks=len(top_fuentes))
                         mostrar_y_guardar(fig_heat, "Matriz_Intensidad_Medios")
 
-                    # 3. SENTIMIENTO
                     if 'Sentimiento' in df_time.columns:
                         st.markdown("---")
                         st.subheader("Sentimiento Acumulado")
