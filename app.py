@@ -538,58 +538,75 @@ if archivo and col_texto and df is not None:
         st.subheader("Detección de Patrones (Topic Modeling) — KMeans con barrido automático de K")
 
         st.markdown(
-            "Esta pestaña fuerza **KMeans** (sin outliers) y realiza un **barrido de K** para elegir el valor más razonable "
-            "según **Silhouette (↑)**, **Calinski–Harabasz (↑)** y **Davies–Bouldin (↓)**. "
-            "El resultado del barrido se muestra para justificar por qué se eligió ese K."
+            "Ajusta el rango de **K** y la app probará varios valores para sugerir un **K** automáticamente usando "
+            "**Silhouette**, **Calinski–Harabasz** y **Davies–Bouldin**. Abajo verás las métricas para justificar la elección."
         )
 
-        # Controles del barrido
-        c0, c1, c2, c3 = st.columns([1, 1, 1, 1.4])
+        # Controles (modo simple)
+        c0, c1, c2 = st.columns([1, 1, 1])
         with c0:
             k_min = st.number_input("K mínimo", min_value=2, max_value=300, value=8, step=1)
         with c1:
             k_max = st.number_input("K máximo", min_value=3, max_value=400, value=40, step=1)
         with c2:
             k_step = st.number_input("Paso (ΔK)", min_value=1, max_value=50, value=2, step=1)
-        with c3:
-            eval_cap = int(min(len(df), 30000)) if 'df' in locals() else 10000
-            eval_default = int(min(len(df), 10000)) if 'df' in locals() else 8000
-            eval_n = st.number_input(
-                "Muestra para evaluar K (rápido)",
-                min_value=2000,
-                max_value=max(2000, eval_cap),
-                value=max(2000, eval_default),
-                step=1000,
-                help="Para acelerar, el barrido usa una muestra aleatoria (no todo el dataset)."
-            )
 
-        c4, c5, c6 = st.columns([1, 1, 1])
-        with c4:
+        selection_rule = st.selectbox(
+            "Elegir K automáticamente por",
+            ["Score compuesto (recomendado)", "Mayor Silhouette", "Mayor Calinski–Harabasz", "Menor Davies–Bouldin"],
+            help="El score compuesto combina las 3 métricas (Silhouette↑, Calinski–Harabasz↑, Davies–Bouldin↓) con normalización."
+        )
+
+        # Muestra automática para el barrido (se ajusta según el tamaño del dataset)
+        n_docs = int(len(df))
+        if n_docs <= 2500:
+            eval_n_auto = n_docs
+        elif n_docs <= 15000:
+            eval_n_auto = 3000
+        elif n_docs <= 40000:
+            eval_n_auto = 5000
+        else:
+            eval_n_auto = 7000
+
+        eval_n = eval_n_auto  # puede sobrescribirse en ajustes avanzados
+        st.caption(f"El barrido evalúa K con una muestra automática de **{format(eval_n_auto, ',').replace(',', '.')}** documentos (de {format(n_docs, ',').replace(',', '.')}).")
+
+        # Defaults (avanzado)
+        dim_mode = "PCA (5)"
+        use_minibatch = (n_docs > 30000)
+        calculate_probs = False
+
+        with st.expander("Ajustes avanzados", expanded=False):
+            override_eval = st.checkbox("Ajustar manualmente la muestra de evaluación", value=False)
+            if override_eval:
+                step_val = 100 if n_docs < 5000 else 500
+                eval_n = st.slider(
+                    "Tamaño de muestra para evaluar K",
+                    min_value=(1 if n_docs < 200 else 200),
+                    max_value=min(n_docs, 30000),
+                    value=(min(n_docs, max(2000, eval_n_auto)) if n_docs >= 2000 else n_docs),
+                    step=step_val,
+                    help="Más grande = métricas más estables, pero más lento (Silhouette suele ser lo más costoso)."
+                )
+
             dim_mode = st.selectbox(
-                "Reducción para clustering (recomendado)",
+                "Reducción para clustering",
                 ["PCA (5)", "Sin reducción"],
-                help="PCA suele ayudar a KMeans y acelera métricas. 'Sin reducción' usa los embeddings completos."
+                index=0,
+                help="PCA suele ayudar a KMeans y acelera métricas."
             )
-        with c5:
             use_minibatch = st.checkbox(
                 "Usar MiniBatchKMeans en el barrido (más rápido)",
-                value=(len(df) > 30000),
-                help="El barrido evalúa muchos K; MiniBatchKMeans suele ser mucho más rápido en datasets grandes."
+                value=use_minibatch
             )
-        with c6:
-            selection_rule = st.selectbox(
-                "Elegir K automáticamente por",
-                ["Score compuesto (recomendado)", "Mayor Silhouette", "Mayor Calinski–Harabasz", "Menor Davies–Bouldin"],
-                help="El score compuesto normaliza las 3 métricas y favorece K con buena separación (sil/CH) y bajo solapamiento (DB)."
-            )
+            calculate_probs = st.checkbox("Calcular probabilidades (más lento)", value=calculate_probs)
 
-        calculate_probs = st.checkbox("Calcular probabilidades (más lento)", value=False)
-
-        st.caption("Tip: si tu dataset tiene temas muy finos, aumenta K_max; si te salen temas muy repetidos, baja K_max o sube el paso.")
+        st.caption("Tip: si ves temas demasiado mezclados, baja K_max o sube ΔK; si ves temas muy generales, sube K_max.")
 
         if k_max < k_min:
             st.error("K máximo debe ser mayor o igual a K mínimo.")
         else:
+
             if st.button("Ejecutar Topic Modeling (KMeans)", type="primary"):
                 with st.spinner("Generando embeddings..."):
                     embedding_model = cargar_modelo_embeddings()
@@ -637,7 +654,8 @@ if archivo and col_texto and df is not None:
                         # Métricas: Silhouette (↑), Calinski–Harabasz (↑), Davies–Bouldin (↓)
                         # Nota: Silhouette puede ser más costoso; aquí lo calculamos sobre la muestra.
                         try:
-                            sil = silhouette_score(X_eval, labels)
+                            sil_sample = min(2000, len(X_eval))
+                            sil = silhouette_score(X_eval, labels, sample_size=sil_sample, random_state=42)
                         except Exception:
                             sil = np.nan
 
