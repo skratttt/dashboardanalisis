@@ -6,6 +6,10 @@ import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 import spacy
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.cluster import KMeans, MiniBatchKMeans
+from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
+from sklearn.preprocessing import normalize
+from sklearn.decomposition import PCA
 import torch
 from transformers import BertTokenizer, BertForSequenceClassification
 from bertopic import BERTopic
@@ -531,75 +535,260 @@ if archivo and col_texto and df is not None:
 
     # ---------------- TAB 5: CLUSTERIZACION ----------------
     with tabs[4]:
-        st.subheader("Detección de Patrones (Topic Modeling)")
-        c_controls_1, c_controls_2 = st.columns(2)
-        with c_controls_1:
-            n_topics_aprox = st.slider("Número de Temas Deseados", 2, 50, 5)
-        with c_controls_2:
-            force_assign = st.checkbox("Forzar asignación de Outliers", value=True)
+        st.subheader("Detección de Patrones (Topic Modeling) — KMeans con barrido automático de K")
 
-        if st.button("Ejecutar Clustering", type="primary"):
-            with st.spinner("Generando Embeddings y Clusters..."):
-                try:
+        st.markdown(
+            "Esta pestaña fuerza **KMeans** (sin outliers) y realiza un **barrido de K** para elegir el valor más razonable "
+            "según **Silhouette (↑)**, **Calinski–Harabasz (↑)** y **Davies–Bouldin (↓)**. "
+            "El resultado del barrido se muestra para justificar por qué se eligió ese K."
+        )
+
+        # Controles del barrido
+        c0, c1, c2, c3 = st.columns([1, 1, 1, 1.4])
+        with c0:
+            k_min = st.number_input("K mínimo", min_value=2, max_value=300, value=8, step=1)
+        with c1:
+            k_max = st.number_input("K máximo", min_value=3, max_value=400, value=40, step=1)
+        with c2:
+            k_step = st.number_input("Paso (ΔK)", min_value=1, max_value=50, value=2, step=1)
+        with c3:
+            eval_cap = int(min(len(df), 30000)) if 'df' in locals() else 10000
+            eval_default = int(min(len(df), 10000)) if 'df' in locals() else 8000
+            eval_n = st.number_input(
+                "Muestra para evaluar K (rápido)",
+                min_value=2000,
+                max_value=max(2000, eval_cap),
+                value=max(2000, eval_default),
+                step=1000,
+                help="Para acelerar, el barrido usa una muestra aleatoria (no todo el dataset)."
+            )
+
+        c4, c5, c6 = st.columns([1, 1, 1])
+        with c4:
+            dim_mode = st.selectbox(
+                "Reducción para clustering (recomendado)",
+                ["PCA (5)", "Sin reducción"],
+                help="PCA suele ayudar a KMeans y acelera métricas. 'Sin reducción' usa los embeddings completos."
+            )
+        with c5:
+            use_minibatch = st.checkbox(
+                "Usar MiniBatchKMeans en el barrido (más rápido)",
+                value=(len(df) > 30000),
+                help="El barrido evalúa muchos K; MiniBatchKMeans suele ser mucho más rápido en datasets grandes."
+            )
+        with c6:
+            selection_rule = st.selectbox(
+                "Elegir K automáticamente por",
+                ["Score compuesto (recomendado)", "Mayor Silhouette", "Mayor Calinski–Harabasz", "Menor Davies–Bouldin"],
+                help="El score compuesto normaliza las 3 métricas y favorece K con buena separación (sil/CH) y bajo solapamiento (DB)."
+            )
+
+        calculate_probs = st.checkbox("Calcular probabilidades (más lento)", value=False)
+
+        st.caption("Tip: si tu dataset tiene temas muy finos, aumenta K_max; si te salen temas muy repetidos, baja K_max o sube el paso.")
+
+        if k_max < k_min:
+            st.error("K máximo debe ser mayor o igual a K mínimo.")
+        else:
+            if st.button("Ejecutar Topic Modeling (KMeans)", type="primary"):
+                with st.spinner("Generando embeddings..."):
                     embedding_model = cargar_modelo_embeddings()
-                    docs = df[col_texto].tolist()
-                    embeddings = embedding_model.encode(docs, show_progress_bar=False)
-                    vectorizer_model = CountVectorizer(stop_words=all_stopwords, min_df=2)
-                    min_size = max(5, int(len(docs) * 0.005))
-                    
-                    topic_model = BERTopic(language="multilingual", min_topic_size=min_size, nr_topics=n_topics_aprox,
-                                          vectorizer_model=vectorizer_model, calculate_probabilities=True, verbose=True)
-                    
-                    topics, probs = topic_model.fit_transform(docs, embeddings)
-                    
-                    if force_assign:
+                    docs = df[col_texto].fillna("").astype(str).tolist()
+                    embeddings = embedding_model.encode(docs, show_progress_bar=False, batch_size=64)
+
+                # Para métricas: normalizamos y opcionalmente reducimos dimensión
+                X = normalize(embeddings)
+                if dim_mode.startswith("PCA"):
+                    with st.spinner("Aplicando PCA (5 componentes) para clustering/métricas..."):
+                        pca_model = PCA(n_components=5)
+                        X = pca_model.fit_transform(X)
+                else:
+                    pca_model = None
+
+                # Barrido de K en muestra
+                rng = np.random.default_rng(42)
+                n_total = X.shape[0]
+                eval_n = int(min(max(2000, eval_n), n_total))
+                eval_idx = rng.choice(n_total, size=eval_n, replace=False)
+                X_eval = X[eval_idx]
+
+                ks = list(range(int(k_min), int(k_max) + 1, int(k_step)))
+                results = []
+                prog = st.progress(0.0)
+                status = st.empty()
+
+                with st.spinner("Evaluando K candidatos..."):
+                    for i, k in enumerate(ks):
+                        status.write(f"Evaluando K={k} ({i+1}/{len(ks)}) ...")
+
+                        if use_minibatch:
+                            km = MiniBatchKMeans(
+                                n_clusters=k,
+                                random_state=42,
+                                batch_size=2048,
+                                n_init=10,
+                                reassignment_ratio=0.01
+                            )
+                        else:
+                            km = KMeans(n_clusters=k, random_state=42, n_init=10)
+
+                        labels = km.fit_predict(X_eval)
+
+                        # Métricas: Silhouette (↑), Calinski–Harabasz (↑), Davies–Bouldin (↓)
+                        # Nota: Silhouette puede ser más costoso; aquí lo calculamos sobre la muestra.
                         try:
-                            new_topics = topic_model.reduce_outliers(docs, topics, strategy="embeddings", embeddings=embeddings)
-                            topic_model.update_topics(docs, topics=new_topics, vectorizer_model=vectorizer_model)
-                            topics = new_topics
-                        except: pass
-                    
-                    df['Cluster_ID'] = topics
+                            sil = silhouette_score(X_eval, labels)
+                        except Exception:
+                            sil = np.nan
+
+                        try:
+                            ch = calinski_harabasz_score(X_eval, labels)
+                        except Exception:
+                            ch = np.nan
+
+                        try:
+                            db = davies_bouldin_score(X_eval, labels)
+                        except Exception:
+                            db = np.nan
+
+                        results.append({
+                            "K": k,
+                            "Silhouette": sil,
+                            "Calinski-Harabasz": ch,
+                            "Davies-Bouldin": db
+                        })
+
+                        prog.progress((i + 1) / max(1, len(ks)))
+
+                metrics_df = pd.DataFrame(results).dropna()
+
+                if metrics_df.empty:
+                    st.error("No se pudieron calcular métricas para ningún K. Revisa que el dataset tenga suficiente variación.")
+                else:
+                    # Selección automática de K
+                    mdf = metrics_df.copy()
+
+                    # Normalización min-max para score compuesto
+                    def minmax(s):
+                        s = s.astype(float)
+                        mn, mx = s.min(), s.max()
+                        if mx - mn == 0:
+                            return pd.Series(np.ones(len(s)), index=s.index)
+                        return (s - mn) / (mx - mn)
+
+                    mdf["Sil_norm"] = minmax(mdf["Silhouette"])
+                    mdf["CH_norm"] = minmax(mdf["Calinski-Harabasz"])
+                    mdf["DB_norm"] = 1 - minmax(mdf["Davies-Bouldin"])  # menor DB es mejor
+
+                    mdf["Score_compuesto"] = (mdf["Sil_norm"] + mdf["CH_norm"] + mdf["DB_norm"]) / 3.0
+
+                    if selection_rule.startswith("Score compuesto"):
+                        best_row = mdf.loc[mdf["Score_compuesto"].idxmax()]
+                    elif selection_rule.startswith("Mayor Silhouette"):
+                        best_row = mdf.loc[mdf["Silhouette"].idxmax()]
+                    elif selection_rule.startswith("Mayor Calinski"):
+                        best_row = mdf.loc[mdf["Calinski-Harabasz"].idxmax()]
+                    else:
+                        best_row = mdf.loc[mdf["Davies-Bouldin"].idxmin()]
+
+                    best_k = int(best_row["K"])
+
+                    st.success(
+                        f"✅ K seleccionado automáticamente: **{best_k}** "
+                        f"(Sil={best_row['Silhouette']:.4f}, CH={best_row['Calinski-Harabasz']:.1f}, DB={best_row['Davies-Bouldin']:.4f})"
+                    )
+
+                    # Mostrar tabla y gráficos del barrido
+                    st.subheader("Resultados del barrido de K")
+                    show_cols = ["K", "Silhouette", "Calinski-Harabasz", "Davies-Bouldin"]
+                    st.dataframe(metrics_df[show_cols].style.format({
+                        "Silhouette": "{:.4f}",
+                        "Calinski-Harabasz": "{:.1f}",
+                        "Davies-Bouldin": "{:.4f}",
+                    }), use_container_width=True)
+
+                    g1, g2, g3 = st.columns(3)
+                    with g1:
+                        fig_s = px.line(metrics_df, x="K", y="Silhouette", markers=True, title="Silhouette (↑)")
+                        fig_s.add_vline(x=best_k, line_dash="dash")
+                        mostrar_y_guardar(fig_s, "Barrido_K_Silhouette")
+                    with g2:
+                        fig_ch = px.line(metrics_df, x="K", y="Calinski-Harabasz", markers=True, title="Calinski–Harabasz (↑)")
+                        fig_ch.add_vline(x=best_k, line_dash="dash")
+                        mostrar_y_guardar(fig_ch, "Barrido_K_CalinskiHarabasz")
+                    with g3:
+                        fig_db = px.line(metrics_df, x="K", y="Davies-Bouldin", markers=True, title="Davies–Bouldin (↓)")
+                        fig_db.add_vline(x=best_k, line_dash="dash")
+                        mostrar_y_guardar(fig_db, "Barrido_K_DaviesBouldin")
+
+                    # Entrenar BERTopic con K seleccionado
+                    with st.spinner("Ajustando BERTopic con el K seleccionado..."):
+                        vectorizer_model = CountVectorizer(stop_words=all_stopwords, min_df=2)
+
+                        # KMeans final (sobre lo que use BERTopic internamente)
+                        cluster_model = KMeans(n_clusters=best_k, random_state=42, n_init=10)
+
+                        # Dimensionalidad para BERTopic (consistente con selección)
+                        if dim_mode.startswith("PCA") and pca_model is not None:
+                            dim_model = PCA(n_components=5)
+                        else:
+                            from bertopic.dimensionality import BaseDimensionalityReduction
+                            dim_model = BaseDimensionalityReduction()
+
+                        topic_model = BERTopic(
+                            language="spanish",
+                            umap_model=dim_model,
+                            hdbscan_model=cluster_model,
+                            vectorizer_model=vectorizer_model,
+                            calculate_probabilities=calculate_probs,
+                            verbose=True
+                        )
+
+                        topics, probs = topic_model.fit_transform(docs, embeddings)
+
+                    df["Cluster_ID"] = topics
                     freq = topic_model.get_topic_info()
-                    freq_clean = freq[freq['Topic'] != -1].head(20)
-                    freq_clean['Nombre_Tema'] = freq_clean['Name'].apply(lambda x: " ".join(x.split("_")[1:4]))
-                    
-                    col_res1, col_res2 = st.columns([2, 1])
-                    with col_res1:
-                        st.markdown("#### Distribución de Temas")
-                        fig_bar = px.bar(freq_clean, x='Count', y='Nombre_Tema', orientation='h', 
-                                         text_auto=True, title="Temas Detectados", color='Count')
-                        fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, showlegend=False)
-                        mostrar_y_guardar(fig_bar, "Cluster_Distribucion_Temas")
-                        
-                    with col_res2:
-                        st.markdown("#### Mapa Intertópico")
-                        try:
-                            fig_inter = topic_model.visualize_topics()
-                            mostrar_y_guardar(fig_inter, "Cluster_Mapa_Intertopico")
-                        except:
-                            st.info("Se necesitan más temas.")
+                    freq_clean = freq[freq["Topic"] != -1].head(20).copy()
+                    if "Name" in freq_clean.columns:
+                        freq_clean["Nombre_Tema"] = freq_clean["Name"].apply(lambda x: " ".join(str(x).split("_")[1:4]))
 
-                    st.markdown("---")
-                    st.subheader("Palabras Clave por Grupo")
-                    top_clusters = freq_clean['Topic'].tolist()[:6] 
-                    cols_wc = st.columns(3)
-                    for i, topic_id in enumerate(top_clusters):
-                        topic_words = topic_model.get_topic(topic_id)
-                        if topic_words:
-                            keywords_dict = {word: score for word, score in topic_words}
-                            wc_cluster = WordCloud(width=400, height=250, background_color='white', colormap='viridis').generate_from_frequencies(keywords_dict)
-                            with cols_wc[i % 3]:
-                                st.markdown(f"**Grupo {topic_id}**")
-                                fig_wc, ax_wc = plt.subplots(figsize=(4, 3), facecolor='white')
-                                ax_wc.imshow(np.array(wc_cluster.to_image()), interpolation='bilinear')
-                                ax_wc.axis('off')
-                                st.pyplot(fig_wc)
-                                plt.close()
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.subheader("Top Temas (20)")
+                    if "Nombre_Tema" in freq_clean.columns:
+                        st.dataframe(freq_clean[["Topic", "Count", "Nombre_Tema"]], use_container_width=True)
+                    else:
+                        st.dataframe(freq_clean, use_container_width=True)
 
-    # ---------------- TAB 6: BUSQUEDA ----------------
+                    # Visualizaciones
+                    st.subheader("Distribución de Temas")
+                    try:
+                        fig_bar = topic_model.visualize_barchart(top_n_topics=min(20, len(freq) - 1))
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                    except Exception:
+                        st.warning("No se pudo generar el gráfico de barras de temas.")
+
+                    st.subheader("Mapa Intertópico")
+                    try:
+                        fig_map = topic_model.visualize_topics()
+                        st.plotly_chart(fig_map, use_container_width=True)
+                    except Exception:
+                        st.warning("No se pudo generar el mapa intertópico.")
+
+                    st.subheader("Wordcloud por Tema (Top 6)")
+                    try:
+                        top_topics = freq_clean["Topic"].tolist()[:6]
+                        for t in top_topics:
+                            words = topic_model.get_topic(t)
+                            if not words:
+                                continue
+                            wc = WordCloud(width=900, height=450, background_color="white")
+                            wc.generate_from_frequencies({w: float(s) for w, s in words})
+                            fig, ax = plt.subplots(figsize=(10, 5))
+                            ax.imshow(wc)
+                            ax.axis("off")
+                            st.pyplot(fig)
+                    except Exception:
+                        st.warning("No se pudieron generar wordclouds.")
+# ---------------- TAB 6: BUSQUEDA ----------------
     with tabs[5]:
         st.subheader("Motor de Busqueda Semantica")
         query = st.text_input("Consulta:", placeholder="Ej: Problemas de infraestructura...")
