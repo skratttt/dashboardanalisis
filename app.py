@@ -154,8 +154,37 @@ def predecir_lote(textos, tokenizer, model):
     return preds
 
 # ==========================================
-# 3. SIDEBAR Y CARGA DE DATOS (VERSIÓN TANQUE)
+# 3. SIDEBAR Y CARGA DE DATOS (MEJORADO)
 # ==========================================
+import re  # Asegúrate de que esto esté importado
+
+def detectar_intencion(texto):
+    """Clasifica el tweet según palabras clave del contexto Registro Civil"""
+    if not isinstance(texto, str): return "Otros"
+    t = texto.lower()
+    
+    # 1. Emergencia / Operativos (Basado en CSV: incendios, Biobío, terreno)
+    keywords_emergencia = ['emergencia', 'operativo', 'incendio', 'afectad', 'desplegado', 'terreno', 'ayuda', 'centro de acopio']
+    if any(x in t for x in keywords_emergencia):
+        return '⚠️ Emergencia/Operativo'
+        
+    # 2. Reclamos / Problemas Técnicos (Basado en CSV: página caída, error, lento)
+    keywords_reclamo = ['pésimo', 'malo', 'lento', 'reclamo', 'vergüenza', 'colapso', 'no funciona', 'caida', 'error', 'fila', 'espera']
+    if any(x in t for x in keywords_reclamo):
+        return '😡 Reclamo/Problema'
+        
+    # 3. Dudas / Trámites (Basado en CSV: cédula, pasaporte, clave única)
+    keywords_duda = ['duda', 'consulta', 'cómo', 'donde', 'puedo', 'requisito', 'horario', 'necesito', 'hola', 'cédula', 'pasaporte', 'clave']
+    if any(x in t for x in keywords_duda):
+        return '❓ Duda/Trámite'
+    
+    # 4. Agendamiento
+    keywords_agenda = ['agenda', 'hora', 'cita', 'reservar', 'disponible', 'bloqueo']
+    if any(x in t for x in keywords_agenda):
+        return '📅 Agendamiento'
+
+    return 'ℹ️ Información General'
+
 with st.sidebar:
     st.header("Configuración del Dataset")
     archivo = st.file_uploader("1. Subir Archivo (CSV)", type=["csv"])
@@ -178,8 +207,8 @@ with st.sidebar:
         errores_carga = []
         
         combinaciones = [
+            {'sep': ';', 'encoding': 'utf-8'}, # Prioridad al formato de tu CSV
             {'sep': ',', 'encoding': 'utf-8'},
-            {'sep': ';', 'encoding': 'utf-8'},
             {'sep': ',', 'encoding': 'latin-1'},
             {'sep': ';', 'encoding': 'latin-1'},
             {'sep': '\t', 'encoding': 'utf-8'}
@@ -188,7 +217,6 @@ with st.sidebar:
         for config in combinaciones:
             try:
                 archivo.seek(0)
-                # Engine python + on_bad_lines='skip' para saltar errores
                 df_temp = pd.read_csv(
                     archivo, 
                     sep=config['sep'], 
@@ -196,10 +224,8 @@ with st.sidebar:
                     on_bad_lines='skip', 
                     engine='python'
                 )
-                
                 if df_temp.shape[1] > 1:
                     df = df_temp
-                    # st.toast(f"Archivo leído con: {config}", icon="✅")
                     break
             except Exception as e:
                 errores_carga.append(str(e))
@@ -212,46 +238,68 @@ with st.sidebar:
         else:
             st.success(f"Registros cargados: {len(df)}")
             
-            # Limpieza de columnas
+            # Limpieza de nombres de columnas
             df.columns = [str(c).strip() for c in df.columns]
             cols = df.columns.tolist()
             
+            # Autodetección de columna de texto
             idx_txt = 0
-            posibles_nombres = ['texto', 'text', 'body', 'comentario', 'mensaje', 'descripcion', 'titulo', 'title', 'cuerpo', 'bajada', 'content', 'noticia', 'headline']
-            
+            posibles_nombres = ['text', 'texto', 'body', 'comentario', 'mensaje']
             for possible in posibles_nombres:
-                match = next((c for c in cols if possible.lower() in c.lower()), None)
+                match = next((c for c in cols if possible.lower() == c.lower()), None)
                 if match:
                     idx_txt = cols.index(match)
                     break
             
             col_texto = st.selectbox("2. Columna de TEXTO", cols, index=idx_txt)
             
+            # --- PROCESAMIENTO AUTOMÁTICO AL CARGAR ---
             if col_texto:
                 df = df.dropna(subset=[col_texto])
                 df[col_texto] = df[col_texto].astype(str)
                 
+                # A) NUEVA LIMPIEZA DE TEXTO (ESPECÍFICA PARA TWITTER)
                 def limpiar_texto_duro(txt):
                     if not isinstance(txt, str): return str(txt)
                     t = txt.lower()
+                    # Eliminar URLs (http/https/www)
+                    t = re.sub(r'http\S+|www\S+|https\S+', '', t, flags=re.MULTILINE)
+                    # Eliminar menciones (@usuario) y hashtags (#tema)
+                    t = re.sub(r'@\w+', '', t)
+                    t = re.sub(r'#\w+', '', t)
+                    # Eliminar "RT" al inicio
+                    t = re.sub(r'^rt\s+', '', t)
+                    # Limpieza estándar
                     t = t.replace("ee.uu.", "eeuu").replace("&quot;", "").replace('"', '')
-                    return t
+                    return t.strip()
+                
                 df[col_texto] = df[col_texto].apply(limpiar_texto_duro)
 
+                # B) NUEVA DETECCIÓN DE INTENCIÓN AUTOMÁTICA
+                if 'Intencion_Detectada' not in df.columns:
+                    with st.spinner("Clasificando intenciones del ciudadano..."):
+                        df['Intencion_Detectada'] = df[col_texto].apply(detectar_intencion)
+                    st.toast("✅ Intenciones clasificadas automáticamente")
+
             st.info("Opcional: Agrupador")
-            col_cat = st.selectbox("3. Columna de AGRUPACIÓN", ["No aplicar"] + cols)
+            # Añadimos la nueva columna generada a las opciones
+            opciones_cat = ["No aplicar", "Intencion_Detectada"] + cols
+            col_cat = st.selectbox("3. Columna de AGRUPACIÓN", opciones_cat, index=1) # Pre-selecciona Intención
             
             st.info("Opcional: Análisis Temporal")
-            col_fecha = st.selectbox("4. Columna de FECHA", ["No aplicar"] + cols)
+            # Autodetección de fecha (created_at)
+            idx_fecha = 0
+            if 'created_at' in cols: idx_fecha = cols.index('created_at') + 1
+            col_fecha = st.selectbox("4. Columna de FECHA", ["No aplicar"] + cols, index=idx_fecha)
 
             st.header("Filtros de Texto")
-            lista_defecto = "el, la, los, un, una, de, del, y, o, que, qué, quien, quién, por, para, con, se, su, sus, lo, las, al, como, cómo, mas, más, noticia, tras, segun, según, hace, puede, ser, es, son, fue, eran, era, habia, hay"
+            lista_defecto = "el, la, los, un, una, de, del, y, o, que, qué, quien, quién, por, para, con, se, su, sus, lo, las, al, como, cómo, mas, más, noticia, tras, segun, según, hace, puede, ser, es, son, fue, eran, era, habia, hay, registro, civil"
             stopwords_input = st.text_area("Palabras a ignorar (separadas por coma)", lista_defecto, height=100)
             custom_stopwords = [x.strip().lower() for x in stopwords_input.split(",")]
             
             st.markdown("---")
             st.header(" Filtro Global")
-            filtro_palabra = st.text_input("Filtrar análisis por palabra clave:", placeholder="Ej: litio...")
+            filtro_palabra = st.text_input("Filtrar análisis por palabra clave:", placeholder="Ej: pasaporte...")
             
             if filtro_palabra:
                 mask = df[col_texto].str.contains(filtro_palabra, case=False, na=False)
@@ -259,7 +307,7 @@ with st.sidebar:
                 st.success(f"Filtrado: {len(df)} registros contienen '{filtro_palabra}'")
             
             st.markdown("---")
-            st.header("📦 Descarga Masiva")
+            st.header(" Descarga Masiva")
             
             if st.button("Generar Reporte Visual (ZIP)"):
                 graficos = st.session_state.figures_to_export
@@ -275,14 +323,13 @@ with st.sidebar:
                                     zf.writestr(f"{nombre}.png", img_bytes)
                             
                             st.download_button(
-                                label=f"📥 Descargar ZIP",
+                                label=f" Descargar ZIP",
                                 data=zip_buffer.getvalue(),
                                 file_name="reporte_graficos.zip",
                                 mime="application/zip"
                             )
                         except Exception as e:
                             st.error(f"Error: {e}")
-
 # ==========================================
 # 4. APLICACIÓN PRINCIPAL
 # ==========================================
