@@ -166,24 +166,24 @@ def detectar_intencion(texto):
     # 1. Emergencia / Operativos (Basado en CSV: incendios, Biobío, terreno)
     keywords_emergencia = ['emergencia', 'operativo', 'incendio', 'afectad', 'desplegado', 'terreno', 'ayuda', 'centro de acopio']
     if any(x in t for x in keywords_emergencia):
-        return '⚠️ Emergencia/Operativo'
+        return ' Emergencia/Operativo'
         
     # 2. Reclamos / Problemas Técnicos (Basado en CSV: página caída, error, lento)
     keywords_reclamo = ['pésimo', 'malo', 'lento', 'reclamo', 'vergüenza', 'colapso', 'no funciona', 'caida', 'error', 'fila', 'espera']
     if any(x in t for x in keywords_reclamo):
-        return '😡 Reclamo/Problema'
+        return ' Reclamo/Problema'
         
     # 3. Dudas / Trámites (Basado en CSV: cédula, pasaporte, clave única)
     keywords_duda = ['duda', 'consulta', 'cómo', 'donde', 'puedo', 'requisito', 'horario', 'necesito', 'hola', 'cédula', 'pasaporte', 'clave']
     if any(x in t for x in keywords_duda):
-        return '❓ Duda/Trámite'
+        return ' Duda/Trámite'
     
     # 4. Agendamiento
     keywords_agenda = ['agenda', 'hora', 'cita', 'reservar', 'disponible', 'bloqueo']
     if any(x in t for x in keywords_agenda):
-        return '📅 Agendamiento'
+        return ' Agendamiento'
 
-    return 'ℹ️ Información General'
+    return ' Información General'
 
 with st.sidebar:
     st.header("Configuración del Dataset")
